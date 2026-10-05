@@ -38,6 +38,7 @@ function usePolling<T>(endpoint: string, fallback: T, intervalMs: number) {
 
   React.useEffect(() => {
     let alive = true;
+
     const load = async () => {
       try {
         const response = await fetch(endpoint, { cache: "no-store" });
@@ -54,6 +55,7 @@ function usePolling<T>(endpoint: string, fallback: T, intervalMs: number) {
 
     load();
     const timer = window.setInterval(load, intervalMs);
+
     return () => {
       alive = false;
       window.clearInterval(timer);
@@ -83,7 +85,13 @@ function timeLabel(value: unknown) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-type ActivityItem = { id: string; at: string; label: string; detail: string; tone: "ok" | "warn" | "neutral" };
+type ActivityItem = {
+  id: string;
+  at: string;
+  label: string;
+  detail: string;
+  tone: "ok" | "warn" | "neutral";
+};
 
 function buildActivityFeed(activity: Activity): ActivityItem[] {
   const items: ActivityItem[] = [];
@@ -104,7 +112,9 @@ function buildActivityFeed(activity: Activity): ActivityItem[] {
       id: `tool-${String(tool.id)}`,
       at: String(tool.created_at ?? ""),
       label: hasError ? "TOOL ERROR" : "TOOL",
-      detail: hasError ? `${String(tool.name)} · ${compact(tool.error, 70)}` : String(tool.name ?? "unknown"),
+      detail: hasError
+        ? `${String(tool.name)} · ${compact(tool.error, 70)}`
+        : String(tool.name ?? "unknown"),
       tone: hasError ? "warn" : "ok",
     });
   }
@@ -124,43 +134,87 @@ function buildActivityFeed(activity: Activity): ActivityItem[] {
     .slice(0, 6);
 }
 
-function Core({ state, connected }: { state: string; connected: boolean }) {
-  const active = connected && !["sleeping", "dead", "offline"].includes(state);
+function MetricCard({
+  title,
+  value,
+  sub,
+  tone = "cyan",
+}: {
+  title: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: "cyan" | "violet" | "green" | "amber";
+}) {
   return (
-    <div className={`core-wrap ${active ? "is-active" : ""}`}>
-      <motion.div
-        className="orbit orbit-a"
-        animate={{ rotate: 360 }}
-        transition={{ duration: active ? 13 : 24, repeat: Infinity, ease: "linear" }}
-      />
-      <motion.div
-        className="orbit orbit-b"
-        animate={{ rotate: -360 }}
-        transition={{ duration: active ? 9 : 18, repeat: Infinity, ease: "linear" }}
-      />
-      <motion.div
-        className="core"
-        animate={{ scale: active ? [1, 1.045, 1] : [1, 1.018, 1], opacity: [0.9, 1, 0.9] }}
-        transition={{ duration: active ? 2.2 : 4.2, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <div className="core-grid" />
-        <div className="core-node node-a" />
-        <div className="core-node node-b" />
-        <div className="core-node node-c" />
-        <div className="core-label">ARYQEN</div>
-        <div className="core-state">{connected ? state.toUpperCase() : "BRIDGE OFFLINE"}</div>
-      </motion.div>
-    </div>
+    <motion.section
+      className={`metric-card tone-${tone}`}
+      whileHover={{ y: -3, scale: 1.008 }}
+      transition={{ duration: 0.18 }}
+    >
+      <div className="metric-corner" />
+      <div className="metric-title">{title}</div>
+      <div className="metric-value">{value}</div>
+      {sub && <div className="metric-sub">{sub}</div>}
+    </motion.section>
   );
 }
 
-function Card({ title, value, sub }: { title: string; value: React.ReactNode; sub?: React.ReactNode }) {
+function NeuralCore({ state, connected }: { state: string; connected: boolean }) {
+  const active = connected && !["sleeping", "dead", "offline", "setup"].includes(state);
+  const pace = active ? 1 : 1.7;
+
   return (
-    <motion.section className="card" whileHover={{ y: -2 }} transition={{ duration: 0.16 }}>
-      <div className="card-title">{title}</div>
-      <div className="card-value">{value}</div>
-      {sub && <div className="card-sub">{sub}</div>}
-    </motion.section>
+    <div className={`neural-core ${active ? "is-active" : ""}`}>
+      <div className="core-halo halo-outer" />
+      <div className="core-halo halo-mid" />
+
+      <motion.div
+        className="ring ring-1"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 24 * pace, repeat: Infinity, ease: "linear" }}
+      />
+      <motion.div
+        className="ring ring-2"
+        animate={{ rotate: -360 }}
+        transition={{ duration: 17 * pace, repeat: Infinity, ease: "linear" }}
+      />
+      <motion.div
+        className="ring ring-3"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 10 * pace, repeat: Infinity, ease: "linear" }}
+      />
+      <motion.div
+        className="ring ring-4"
+        animate={{ rotate: -360 }}
+        transition={{ duration: 7 * pace, repeat: Infinity, ease: "linear" }}
+      />
+
+      <div className="orbital-node n1" />
+      <div className="orbital-node n2" />
+      <div className="orbital-node n3" />
+      <div className="orbital-node n4" />
+      <div className="orbital-node n5" />
+      <div className="orbital-node n6" />
+
+      <motion.div
+        className="core-sphere"
+        animate={{
+          scale: active ? [1, 1.035, 1] : [1, 1.018, 1],
+          filter: active
+            ? ["brightness(1)", "brightness(1.2)", "brightness(1)"]
+            : ["brightness(.92)", "brightness(1)", "brightness(.92)"],
+        }}
+        transition={{ duration: active ? 2.3 : 4.6, repeat: Infinity, ease: "easeInOut" }}
+      >
+        <div className="neural-web" />
+        <div className="core-scanline" />
+        <div className="core-brand">ARYQEN</div>
+        <div className="core-mode">{connected ? state.toUpperCase() : "BRIDGE OFFLINE"}</div>
+      </motion.div>
+
+      <div className="axis axis-x" />
+      <div className="axis axis-y" />
+    </div>
   );
 }
 
@@ -169,79 +223,225 @@ function App() {
   const activityPoll = usePolling<Activity>("/api/activity", emptyActivity, 1800);
   const o = overviewPoll.data;
   const activity = buildActivityFeed(activityPoll.data);
-  const credits = o.economy.creditsCents == null ? "—" : `$${(o.economy.creditsCents / 100).toFixed(2)}`;
+
+  const credits =
+    o.economy.creditsCents == null ? "—" : `$${(o.economy.creditsCents / 100).toFixed(2)}`;
+
   const nominal = overviewPoll.connected && o.heartbeat.healthy;
+  const systemLabel = nominal
+    ? "SYSTEM NOMINAL"
+    : overviewPoll.connected
+      ? o.agent.state === "setup"
+        ? "SYSTEM STANDBY"
+        : "RUNTIME DEGRADED"
+      : "BRIDGE OFFLINE";
 
   return (
-    <main className="shell">
-      <div className="scan" />
-      <div className="ambient ambient-a" />
-      <div className="ambient ambient-b" />
+    <main className="control-shell">
+      <div className="grid-plane" />
+      <div className="scan-beam" />
+      <div className="ambient ambient-left" />
+      <div className="ambient ambient-right" />
+      <div className="vignette" />
 
-      <header>
-        <div>
-          <div className="eyebrow">AUTOMATON CORE · ARYQEN CONTROL LAYER</div>
-          <h1>ARYQEN</h1>
-          <div className="runtime-id">RUNTIME / {o.agent.name || "UNNAMED"}</div>
+      <aside className="side-nav">
+        <div className="nav-mark">AQ</div>
+        <div className="nav-stack">
+          <button className="nav-item active"><span>01</span>CONTROL</button>
+          <button className="nav-item"><span>02</span>MISSION</button>
+          <button className="nav-item"><span>03</span>AGENTS</button>
+          <button className="nav-item"><span>04</span>MEMORY</button>
+          <button className="nav-item"><span>05</span>ECONOMY</button>
+          <button className="nav-item"><span>06</span>SECURITY</button>
+          <button className="nav-item"><span>07</span>UPSTREAM</button>
+          <button className="nav-item"><span>08</span>SYSTEM</button>
         </div>
-        <div className="status-stack">
-          <div className="status"><span className={nominal ? "dot ok" : "dot"} /> {nominal ? "SYSTEM NOMINAL" : overviewPoll.connected ? "RUNTIME DEGRADED" : "BRIDGE OFFLINE"}</div>
-          <div className="uptime">UPTIME {formatUptime(o.agent.uptimeSeconds)}</div>
-        </div>
-      </header>
+        <div className="nav-footer"><span className="tiny-dot linked" />LOCAL</div>
+      </aside>
 
-      <section className="hero-grid">
-        <div className="rail left">
-          <Card title="MISSION" value={o.mission.title ?? "No active mission"} sub={`${o.mission.progress}% complete · ${o.mission.runningTasks} running`} />
-          <Card title="WORKERS" value={`${o.workers.active}/${o.workers.total}`} sub="active / total" />
-          <Card title="POLICY" value={o.policy.blockedLast24h} sub="blocked or quarantined · 24h" />
-        </div>
-
-        <div className="center">
-          <Core state={o.agent.state} connected={overviewPoll.connected} />
-          <div className="mission-progress"><span style={{ width: `${Math.max(2, o.mission.progress)}%` }} /></div>
-          <div className="mission-caption">{o.mission.title ?? "ARYQEN observing Automaton runtime"}</div>
-          <div className="telemetry-row">
-            <span>STATE {o.agent.state.toUpperCase()}</span>
-            <span>HEARTBEAT {o.heartbeat.healthy ? "OK" : "WAIT"}</span>
-            <span>BRIDGE {overviewPoll.connected ? "LINKED" : "OFFLINE"}</span>
+      <section className="workspace">
+        <header className="topbar">
+          <div>
+            <div className="eyebrow">AUTOMATON CORE · ARYQEN CONTROL LAYER</div>
+            <h1>ARYQEN <span>CONTROL CENTER</span></h1>
+            <div className="runtime-id">
+              RUNTIME / {o.agent.name || "UNNAMED"} · READ-ONLY OBSERVATION
+            </div>
           </div>
-        </div>
 
-        <div className="rail right">
-          <Card title="BUDGET" value={credits} sub={`AI cost today $${(o.economy.todayInferenceCostCents / 100).toFixed(2)}`} />
-          <Card title="UPSTREAM" value={o.upstream.behind == null ? "—" : o.upstream.behind === 0 ? "SYNCED" : `${o.upstream.behind} BEHIND`} sub={o.upstream.healthy ? "Automaton upstream visible" : "status unavailable"} />
-          <Card title="TIER" value={o.agent.tier?.toUpperCase() ?? "—"} sub="resource state" />
-        </div>
-      </section>
-
-      <section className="bottom-grid">
-        <div className="panel activity-panel">
-          <div className="panel-head">
-            <div className="panel-title">LIVE ACTIVITY</div>
-            <div className={`mini-link ${activityPoll.connected ? "linked" : ""}`}>{activityPoll.connected ? "STREAM LINKED" : "WAITING"}</div>
+          <div className="top-status">
+            <div className="status-line">
+              <span
+                className={`status-dot ${
+                  nominal ? "ok" : overviewPoll.connected ? "standby" : ""
+                }`}
+              />
+              {systemLabel}
+            </div>
+            <div className="status-meta">
+              <span>UPTIME {formatUptime(o.agent.uptimeSeconds)}</span>
+              <span>BRIDGE {overviewPoll.connected ? "LINKED" : "OFFLINE"}</span>
+            </div>
           </div>
-          <div className="activity-list">
-            {activity.length === 0 ? (
-              <div className="activity-empty">No recent runtime events yet.</div>
-            ) : activity.map((item) => (
-              <motion.div className="activity-line" key={item.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}>
-                <span className={`activity-dot ${item.tone}`} />
-                <div className="activity-copy">
-                  <div className="activity-meta"><b>{item.label}</b><em>{timeLabel(item.at)}</em></div>
-                  <div>{item.detail}</div>
+        </header>
+
+        <div className="command-strip">
+          <span className="strip-label">CONTROL</span>
+          <span>CORE STATE <b>{o.agent.state.toUpperCase()}</b></span>
+          <span>HEARTBEAT <b>{o.heartbeat.healthy ? "ONLINE" : "WAIT"}</b></span>
+          <span>POLICY <b>{o.policy.blockedLast24h === 0 ? "CLEAR" : "REVIEW"}</b></span>
+          <span>
+            UPSTREAM{" "}
+            <b>
+              {o.upstream.behind == null
+                ? "UNKNOWN"
+                : o.upstream.behind === 0
+                  ? "SYNCED"
+                  : `${o.upstream.behind} BEHIND`}
+            </b>
+          </span>
+        </div>
+
+        <section className="control-grid">
+          <div className="metric-rail left-rail">
+            <MetricCard
+              title="MISSION"
+              value={o.mission.title ?? "No active mission"}
+              sub={`${o.mission.progress}% complete · ${o.mission.runningTasks} running`}
+            />
+            <MetricCard
+              title="WORKERS"
+              value={`${o.workers.active}/${o.workers.total}`}
+              sub="active / total"
+              tone="violet"
+            />
+            <MetricCard
+              title="POLICY"
+              value={o.policy.blockedLast24h}
+              sub="blocked or quarantined · 24h"
+              tone={o.policy.blockedLast24h > 0 ? "amber" : "green"}
+            />
+          </div>
+
+          <div className="core-stage">
+            <div className="stage-label stage-label-left">NEURAL CONTROL MATRIX</div>
+            <div className="stage-label stage-label-right">LIVE TELEMETRY</div>
+
+            <NeuralCore state={o.agent.state} connected={overviewPoll.connected} />
+
+            <div className="mission-progress">
+              <span style={{ width: `${Math.max(2, o.mission.progress)}%` }} />
+            </div>
+
+            <div className="mission-caption">
+              {o.mission.title ?? "ARYQEN observing Automaton runtime"}
+            </div>
+
+            <div className="telemetry-row">
+              <span>STATE <b>{o.agent.state.toUpperCase()}</b></span>
+              <span>HEARTBEAT <b>{o.heartbeat.healthy ? "OK" : "WAIT"}</b></span>
+              <span>BRIDGE <b>{overviewPoll.connected ? "LINKED" : "OFFLINE"}</b></span>
+            </div>
+          </div>
+
+          <div className="metric-rail right-rail">
+            <MetricCard
+              title="BUDGET"
+              value={credits}
+              sub={`AI cost today $${(o.economy.todayInferenceCostCents / 100).toFixed(2)}`}
+              tone="green"
+            />
+            <MetricCard
+              title="UPSTREAM"
+              value={
+                o.upstream.behind == null
+                  ? "—"
+                  : o.upstream.behind === 0
+                    ? "SYNCED"
+                    : `${o.upstream.behind} BEHIND`
+              }
+              sub={o.upstream.healthy ? "Automaton upstream visible" : "status unavailable"}
+            />
+            <MetricCard
+              title="RESOURCE TIER"
+              value={o.agent.tier?.toUpperCase() ?? "—"}
+              sub="runtime survival state"
+              tone="violet"
+            />
+          </div>
+        </section>
+
+        <section className="lower-deck">
+          <div className="panel activity-panel">
+            <div className="panel-head">
+              <div>
+                <div className="panel-title">LIVE ACTIVITY</div>
+                <div className="panel-kicker">Automaton event surface</div>
+              </div>
+              <div className={`stream-state ${activityPoll.connected ? "linked" : ""}`}>
+                <span className="tiny-dot" />
+                {activityPoll.connected ? "STREAM LINKED" : "WAITING"}
+              </div>
+            </div>
+
+            <div className="activity-list">
+              {activity.length === 0 ? (
+                <div className="activity-empty">
+                  <div className="empty-pulse" />
+                  No recent runtime events yet.
                 </div>
-              </motion.div>
-            ))}
+              ) : (
+                activity.map((item) => (
+                  <motion.div
+                    className="activity-line"
+                    key={item.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                  >
+                    <span className={`activity-dot ${item.tone}`} />
+                    <div className="activity-copy">
+                      <div className="activity-meta">
+                        <b>{item.label}</b>
+                        <em>{timeLabel(item.at)}</em>
+                      </div>
+                      <div>{item.detail}</div>
+                    </div>
+                  </motion.div>
+                ))
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className="panel doctrine-panel">
-          <div className="panel-title">UPSTREAM-FIRST</div>
-          <div className="doctrine-mark">AUTOMATON</div>
-          <div className="telemetry">Core capabilities remain upstream-owned. ARYQEN V1 observes state through a read-only bridge and adds visual control without rewriting the runtime.</div>
-          <div className="security-chip">READ-ONLY · QUERY_ONLY</div>
-        </div>
+          <div className="panel integrity-panel">
+            <div className="panel-title">CORE INTEGRITY</div>
+            <div className="integrity-orb">
+              <span>READ</span>
+              <b>ONLY</b>
+            </div>
+            <div className="integrity-list">
+              <div><span>Automaton core</span><b>INTACT</b></div>
+              <div><span>Control bridge</span><b>QUERY_ONLY</b></div>
+              <div><span>Financial actions</span><b>LOCKED</b></div>
+              <div><span>TINOPRONO access</span><b>DENIED</b></div>
+            </div>
+          </div>
+
+          <div className="panel doctrine-panel">
+            <div className="panel-title">UPSTREAM-FIRST</div>
+            <div className="doctrine-mark">AUTOMATON</div>
+            <div className="telemetry">
+              Native Automaton capabilities stay upstream-owned. ARYQEN adds a reversible visual
+              control layer without rewriting the runtime.
+            </div>
+            <div className="security-chip">MINIMAL DELTA · REVERSIBLE</div>
+          </div>
+        </section>
+
+        <footer className="footer-line">
+          <span>ARYQEN UI / V1.2</span>
+          <span>CONTROL CENTER · LOCAL</span>
+          <span>{new Date().toLocaleDateString()}</span>
+        </footer>
       </section>
     </main>
   );
