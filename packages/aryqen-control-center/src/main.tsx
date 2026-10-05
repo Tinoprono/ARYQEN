@@ -167,6 +167,8 @@ function NeuralCore({ state, connected }: { state: string; connected: boolean })
     <div className={`neural-core ${active ? "is-active" : ""}`}>
       <div className="core-halo halo-outer" />
       <div className="core-halo halo-mid" />
+      <div className="core-crown crown-a" />
+      <div className="core-crown crown-b" />
 
       <motion.div
         className="ring ring-1"
@@ -196,6 +198,16 @@ function NeuralCore({ state, connected }: { state: string; connected: boolean })
       <div className="orbital-node n5" />
       <div className="orbital-node n6" />
 
+      <div className="signal-spoke spoke-a"><span /></div>
+      <div className="signal-spoke spoke-b"><span /></div>
+      <div className="signal-spoke spoke-c"><span /></div>
+      <div className="signal-spoke spoke-d"><span /></div>
+
+      <div className="data-beacon beacon-a"><b>MEM</b><span>SYNC</span></div>
+      <div className="data-beacon beacon-b"><b>POL</b><span>SAFE</span></div>
+      <div className="data-beacon beacon-c"><b>UP</b><span>LINK</span></div>
+      <div className="data-beacon beacon-d"><b>HB</b><span>WAIT</span></div>
+
       <motion.div
         className="core-sphere"
         animate={{
@@ -207,7 +219,15 @@ function NeuralCore({ state, connected }: { state: string; connected: boolean })
         transition={{ duration: active ? 2.3 : 4.6, repeat: Infinity, ease: "easeInOut" }}
       >
         <div className="neural-web" />
+        <div className="neural-lattice" />
         <div className="core-scanline" />
+        <div className="core-heartbeat">
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+        </div>
         <div className="core-brand">ARYQEN</div>
         <div className="core-mode">{connected ? state.toUpperCase() : "BRIDGE OFFLINE"}</div>
       </motion.div>
@@ -327,6 +347,11 @@ function App() {
             <div className="stage-label stage-label-left">NEURAL CONTROL MATRIX</div>
             <div className="stage-label stage-label-right">LIVE TELEMETRY</div>
 
+            <div className="core-status-stack">
+              <span><i className="cs cyan" />OBSERVATION MODE</span>
+              <span><i className="cs green" />CORE INTACT</span>
+            </div>
+
             <NeuralCore state={o.agent.state} connected={overviewPoll.connected} />
 
             <div className="mission-progress">
@@ -438,7 +463,7 @@ function App() {
         </section>
 
         <footer className="footer-line">
-          <span>ARYQEN UI / V1.2</span>
+          <span>ARYQEN UI / V1.3</span>
           <span>CONTROL CENTER · LOCAL</span>
           <span>{new Date().toLocaleDateString()}</span>
         </footer>
