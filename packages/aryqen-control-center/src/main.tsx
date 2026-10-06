@@ -55,11 +55,19 @@ type MemoryData = {
 };
 
 type UpstreamData = {
-  behind?: number | null;
-  commits?: unknown[];
-  checkedAt?: string | null;
-  error?: string;
-  [key: string]: unknown;
+  status: string;
+  reachable: boolean;
+  checkedAt: string | null;
+  repoRoot: string | null;
+  branch: string | null;
+  localHead: string | null;
+  trackedUpstreamSha: string | null;
+  remoteHeadSha: string | null;
+  remoteUrl: string | null;
+  behind: number | null;
+  ahead: number | null;
+  remoteChanged: boolean | null;
+  error: string | null;
 };
 
 type SystemData = {
@@ -70,6 +78,43 @@ type SystemData = {
   heartbeatHistory: Row[];
   latestHeartbeat: Row | null;
   latestMetricSnapshot: Row | null;
+};
+
+type ObservabilityData = {
+  queriedAt: string | null;
+  bridge: {
+    mode: string;
+    processUptimeSeconds: number;
+    databaseQueryOnly: boolean;
+  };
+  heartbeat: {
+    status: string;
+    lastRunAt: string | null;
+    ageSeconds: number | null;
+    staleAfterSeconds: number;
+    latestTask: unknown;
+    latestResult: unknown;
+    latestError: string | null;
+    latestDurationMs: unknown;
+    scheduleCount: number;
+    historyCount: number;
+  };
+  activity24h: {
+    events: number;
+    toolCalls: number;
+    toolErrors: number;
+    turns: number;
+    modifications: number;
+    policyBlocks: number;
+  };
+  freshness: {
+    lastEventAt: string | null;
+    lastToolCallAt: string | null;
+    lastTurnAt: string | null;
+    lastModificationAt: string | null;
+    lastPolicyDecisionAt: string | null;
+    lastMetricSnapshotAt: string | null;
+  };
 };
 
 const emptyOverview: Overview = {
@@ -101,7 +146,21 @@ const emptyMemory: MemoryData = {
   procedures: [],
   relationships: [],
 };
-const emptyUpstream: UpstreamData = { behind: null, commits: [], checkedAt: null };
+const emptyUpstream: UpstreamData = {
+  status: "UNAVAILABLE",
+  reachable: false,
+  checkedAt: null,
+  repoRoot: null,
+  branch: null,
+  localHead: null,
+  trackedUpstreamSha: null,
+  remoteHeadSha: null,
+  remoteUrl: null,
+  behind: null,
+  ahead: null,
+  remoteChanged: null,
+  error: null,
+};
 const emptySystem: SystemData = {
   schemaVersion: null,
   agentState: "setup",
@@ -110,6 +169,39 @@ const emptySystem: SystemData = {
   heartbeatHistory: [],
   latestHeartbeat: null,
   latestMetricSnapshot: null,
+};
+
+const emptyObservability: ObservabilityData = {
+  queriedAt: null,
+  bridge: { mode: "read-only", processUptimeSeconds: 0, databaseQueryOnly: true },
+  heartbeat: {
+    status: "WAITING",
+    lastRunAt: null,
+    ageSeconds: null,
+    staleAfterSeconds: 1800,
+    latestTask: null,
+    latestResult: null,
+    latestError: null,
+    latestDurationMs: null,
+    scheduleCount: 0,
+    historyCount: 0,
+  },
+  activity24h: {
+    events: 0,
+    toolCalls: 0,
+    toolErrors: 0,
+    turns: 0,
+    modifications: 0,
+    policyBlocks: 0,
+  },
+  freshness: {
+    lastEventAt: null,
+    lastToolCallAt: null,
+    lastTurnAt: null,
+    lastModificationAt: null,
+    lastPolicyDecisionAt: null,
+    lastMetricSnapshotAt: null,
+  },
 };
 
 const NAV_ITEMS: Array<{ key: ViewKey; index: string; label: string }> = [
@@ -891,60 +983,90 @@ function SecurityView({ data }: { data: PolicyData }) {
   );
 }
 
-function UpstreamView({ data, overview }: { data: UpstreamData; overview: Overview }) {
-  const commits = Array.isArray(data.commits)
-    ? data.commits.filter((item): item is Row => typeof item === "object" && item !== null)
-    : [];
+function UpstreamView({ data }: { data: UpstreamData }) {
+  const statusTone =
+    data.status === "SYNCED"
+      ? "green"
+      : data.status === "UPDATE_AVAILABLE"
+        ? "amber"
+        : data.reachable
+          ? "cyan"
+          : "amber";
+
+  const shortSha = (sha: string | null) => (sha ? sha.slice(0, 10) : "—");
 
   return (
     <div className="view-shell">
       <div className="view-stat-grid">
-        <StatCard
-          label="STATUS"
-          value={overview.upstream.healthy ? "VISIBLE" : "UNAVAILABLE"}
-          tone={overview.upstream.healthy ? "green" : "amber"}
-        />
-        <StatCard
-          label="BEHIND"
-          value={overview.upstream.behind == null ? "—" : overview.upstream.behind}
-        />
-        <StatCard label="COMMITS" value={commits.length} tone="violet" />
-        <StatCard
-          label="LAST CHECK"
-          value={overview.upstream.checkedAt ? dateTimeLabel(overview.upstream.checkedAt) : "—"}
-        />
+        <StatCard label="LIVE STATUS" value={data.status.replaceAll("_", " ")} tone={statusTone} />
+        <StatCard label="REMOTE" value={data.reachable ? "REACHABLE" : "UNAVAILABLE"} tone={data.reachable ? "green" : "amber"} />
+        <StatCard label="BEHIND" value={data.behind ?? "—"} />
+        <StatCard label="AHEAD" value={data.ahead ?? "—"} tone="violet" />
       </div>
 
-      <Section title="UPSTREAM STATUS" kicker="Automaton upstream compatibility surface">
-        <div className="detail-grid">
-          {Object.entries(data).map(([key, value]) => (
-            <div className="detail-item" key={key}>
-              <span>{key.replaceAll("_", " ")}</span>
-              <b>{display(value, 180)}</b>
-            </div>
-          ))}
-        </div>
-      </Section>
+      <div className="view-columns two">
+        <Section title="LIVE UPSTREAM" kicker="Read-only Git network check — no fetch, merge or checkout">
+          <div className="detail-grid">
+            <div className="detail-item"><span>branch</span><b>{display(data.branch)}</b></div>
+            <div className="detail-item"><span>checked at</span><b>{dateTimeLabel(data.checkedAt)}</b></div>
+            <div className="detail-item"><span>local head</span><b className="mono-value">{shortSha(data.localHead)}</b></div>
+            <div className="detail-item"><span>tracked upstream</span><b className="mono-value">{shortSha(data.trackedUpstreamSha)}</b></div>
+            <div className="detail-item"><span>remote head</span><b className="mono-value">{shortSha(data.remoteHeadSha)}</b></div>
+            <div className="detail-item"><span>remote changed</span><b>{data.remoteChanged == null ? "—" : data.remoteChanged ? "YES" : "NO"}</b></div>
+          </div>
+        </Section>
 
-      <Section title="UPSTREAM COMMITS" kicker="Available upstream commit metadata">
-        <DataTable
-          rows={commits.slice(0, 30)}
-          emptyLabel="No upstream commit data has been captured yet."
-          columns={[
-            { key: "sha", label: "SHA" },
-            { key: "message", label: "MESSAGE" },
-            { key: "author", label: "AUTHOR" },
-            { key: "date", label: "DATE", render: (row) => dateTimeLabel(row.date) },
-          ]}
-        />
+        <Section title="UPSTREAM POLICY" kicker="Upstream-first compatibility guard">
+          <div className="upstream-policy">
+            <div className={`upstream-signal ${data.status.toLowerCase()}`}>
+              <i />
+              <div>
+                <b>{data.status.replaceAll("_", " ")}</b>
+                <span>
+                  {data.status === "SYNCED"
+                    ? "The locally tracked Automaton upstream matches the live remote head."
+                    : data.status === "UPDATE_AVAILABLE"
+                      ? "A newer Automaton upstream head is visible. No code has been fetched or merged."
+                      : data.error ?? "Upstream state is not fully available."}
+                </span>
+              </div>
+            </div>
+            <div className="policy-note">
+              ARYQEN only observes the remote here. Promotion remains gated by compatibility tests.
+            </div>
+          </div>
+        </Section>
+      </div>
+
+      <Section title="REMOTE IDENTITY" kicker="Git source currently configured as Automaton upstream">
+        <div className="detail-grid">
+          <div className="detail-item"><span>remote url</span><b>{display(data.remoteUrl, 160)}</b></div>
+          <div className="detail-item"><span>repository root</span><b>{display(data.repoRoot, 160)}</b></div>
+          <div className="detail-item"><span>live lookup</span><b>{data.reachable ? "READ-ONLY LS-REMOTE PASS" : "UNAVAILABLE"}</b></div>
+          <div className="detail-item"><span>mutation</span><b>NONE</b></div>
+        </div>
       </Section>
     </div>
   );
 }
 
-function SystemView({ data, overview }: { data: SystemData; overview: Overview }) {
+function SystemView({
+  data,
+  overview,
+  observability,
+}: {
+  data: SystemData;
+  overview: Overview;
+  observability: ObservabilityData;
+}) {
   const capabilities = Object.entries(data.capabilities);
   const enabled = capabilities.filter(([, available]) => available).length;
+  const hbTone =
+    observability.heartbeat.status === "HEALTHY"
+      ? "green"
+      : observability.heartbeat.status === "WAITING_SETUP"
+        ? "cyan"
+        : "amber";
 
   return (
     <div className="view-shell">
@@ -952,7 +1074,31 @@ function SystemView({ data, overview }: { data: SystemData; overview: Overview }
         <StatCard label="SCHEMA" value={display(data.schemaVersion)} />
         <StatCard label="AGENT STATE" value={data.agentState.toUpperCase()} tone="violet" />
         <StatCard label="CAPABILITIES" value={`${enabled}/${capabilities.length}`} tone="green" />
-        <StatCard label="HEARTBEAT" value={overview.heartbeat.healthy ? "HEALTHY" : "WAIT"} />
+        <StatCard label="HEARTBEAT" value={observability.heartbeat.status.replaceAll("_", " ")} tone={hbTone} />
+      </div>
+
+      <div className="observability-grid">
+        <Section title="RUNTIME PULSE" kicker="Current read-only bridge and heartbeat diagnostics">
+          <div className="detail-grid">
+            <div className="detail-item"><span>bridge mode</span><b>{observability.bridge.mode.toUpperCase()}</b></div>
+            <div className="detail-item"><span>db query only</span><b>{observability.bridge.databaseQueryOnly ? "YES" : "NO"}</b></div>
+            <div className="detail-item"><span>bridge uptime</span><b>{formatUptime(observability.bridge.processUptimeSeconds)}</b></div>
+            <div className="detail-item"><span>last heartbeat</span><b>{dateTimeLabel(observability.heartbeat.lastRunAt)}</b></div>
+            <div className="detail-item"><span>heartbeat age</span><b>{observability.heartbeat.ageSeconds == null ? "—" : `${observability.heartbeat.ageSeconds}s`}</b></div>
+            <div className="detail-item"><span>stale after</span><b>{`${observability.heartbeat.staleAfterSeconds}s`}</b></div>
+          </div>
+        </Section>
+
+        <Section title="ACTIVITY / 24H" kicker="Runtime activity counters">
+          <div className="pulse-count-grid">
+            <div><span>EVENTS</span><b>{observability.activity24h.events}</b></div>
+            <div><span>TOOLS</span><b>{observability.activity24h.toolCalls}</b></div>
+            <div><span>TOOL ERRORS</span><b>{observability.activity24h.toolErrors}</b></div>
+            <div><span>TURNS</span><b>{observability.activity24h.turns}</b></div>
+            <div><span>MODIFICATIONS</span><b>{observability.activity24h.modifications}</b></div>
+            <div><span>POLICY BLOCKS</span><b>{observability.activity24h.policyBlocks}</b></div>
+          </div>
+        </Section>
       </div>
 
       <Section title="CAPABILITY MATRIX" kicker="Tables/capabilities visible through the read-only adapter">
@@ -998,6 +1144,17 @@ function SystemView({ data, overview }: { data: SystemData; overview: Overview }
           />
         </Section>
       </div>
+
+      <Section title="DATA FRESHNESS" kicker="Most recent observed records by subsystem">
+        <div className="freshness-grid">
+          {Object.entries(observability.freshness).map(([key, value]) => (
+            <div className="freshness-item" key={key}>
+              <span>{key.replace(/^last/, "").replace(/At$/, "").replace(/([A-Z])/g, " $1").trim()}</span>
+              <b>{dateTimeLabel(value)}</b>
+            </div>
+          ))}
+        </div>
+      </Section>
     </div>
   );
 }
@@ -1014,6 +1171,7 @@ function App() {
   const policyPoll = usePolling<PolicyData>("/api/policy", emptyPolicy, 2200);
   const upstreamPoll = usePolling<UpstreamData>("/api/upstream", emptyUpstream, 5000);
   const systemPoll = usePolling<SystemData>("/api/system", emptySystem, 3000);
+  const observabilityPoll = usePolling<ObservabilityData>("/api/observability", emptyObservability, 1800);
 
   const o = overviewPoll.data;
   const nominal = overviewPoll.connected && o.heartbeat.healthy;
@@ -1040,9 +1198,9 @@ function App() {
       case "security":
         return <SecurityView data={policyPoll.data} />;
       case "upstream":
-        return <UpstreamView data={upstreamPoll.data} overview={o} />;
+        return <UpstreamView data={upstreamPoll.data} />;
       case "system":
-        return <SystemView data={systemPoll.data} overview={o} />;
+        return <SystemView data={systemPoll.data} overview={o} observability={observabilityPoll.data} />;
       case "control":
       default:
         return (
@@ -1143,7 +1301,7 @@ function App() {
         </motion.div>
 
         <footer className="footer-line">
-          <span>ARYQEN CONTROL / V1.4</span>
+          <span>ARYQEN CONTROL / V1.5</span>
           <span>READ-ONLY CONTROL CENTER · LOCAL</span>
           <span>{new Date().toLocaleDateString()}</span>
         </footer>

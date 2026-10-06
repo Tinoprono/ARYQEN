@@ -1499,3 +1499,147 @@ h1 span {
     padding-top: 18px;
   }
 }
+
+
+/* ────────────────────────────────────────────────────────────────
+   ARYQEN CONTROL V1.5 — live observability and upstream telemetry
+   ──────────────────────────────────────────────────────────────── */
+
+.observability-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.pulse-count-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pulse-count-grid div {
+  min-height: 74px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(73, 192, 233, .075);
+  background: rgba(4, 15, 26, .34);
+}
+
+.pulse-count-grid span {
+  color: #456978;
+  font-size: 7px;
+  letter-spacing: .12em;
+}
+
+.pulse-count-grid b {
+  color: #dff9ff;
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.freshness-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.freshness-item {
+  padding: 11px 12px;
+  border: 1px solid rgba(73, 192, 233, .07);
+  background: rgba(4, 15, 26, .34);
+}
+
+.freshness-item span {
+  display: block;
+  color: #456978;
+  font-size: 7px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.freshness-item b {
+  color: #8fb9c5;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.upstream-policy {
+  display: grid;
+  gap: 12px;
+}
+
+.upstream-signal {
+  min-height: 104px;
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(82, 202, 242, .09);
+  background: rgba(3, 14, 25, .38);
+}
+
+.upstream-signal > i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #72818b;
+  box-shadow: 0 0 12px rgba(114, 129, 139, .28);
+}
+
+.upstream-signal.synced > i {
+  background: #4fffd0;
+  box-shadow: 0 0 13px rgba(79, 255, 208, .65);
+}
+
+.upstream-signal.update_available > i {
+  background: #ffb267;
+  box-shadow: 0 0 13px rgba(255, 178, 103, .55);
+}
+
+.upstream-signal b {
+  display: block;
+  color: #bceef6;
+  font-size: 10px;
+  letter-spacing: .1em;
+  margin-bottom: 7px;
+}
+
+.upstream-signal span {
+  display: block;
+  color: #638795;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.policy-note {
+  color: #4d6d7a;
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 0 2px;
+}
+
+.mono-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: .03em;
+}
+
+@media (max-width: 900px) {
+  .observability-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .freshness-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .pulse-count-grid,
+  .freshness-grid {
+    grid-template-columns: 1fr;
+  }
+}

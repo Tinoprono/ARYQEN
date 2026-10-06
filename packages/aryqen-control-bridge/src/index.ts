@@ -9,9 +9,9 @@ import {
   getOverview,
   getPolicy,
   getSystem,
-  getUpstream,
   getWorkers,
 } from "./read-model.js";
+import { getLiveUpstream, getObservability } from "./observability.js";
 
 const dbPath = process.env.AUTOMATON_DB_PATH;
 if (!dbPath) throw new Error("AUTOMATON_DB_PATH is required");
@@ -24,16 +24,36 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
 
 const db = openAutomatonState(dbPath);
 
+function overview() {
+  const base = getOverview(db);
+  const upstream = getLiveUpstream();
+  const observability = getObservability(db);
+
+  return {
+    ...base,
+    heartbeat: {
+      healthy: observability.heartbeat.status === "HEALTHY",
+      lastRunAt: observability.heartbeat.lastRunAt,
+    },
+    upstream: {
+      behind: upstream.behind,
+      checkedAt: upstream.checkedAt,
+      healthy: upstream.reachable,
+    },
+  };
+}
+
 const routes: Record<string, () => unknown> = {
-  "/api/overview": () => getOverview(db),
+  "/api/overview": overview,
   "/api/mission": () => getMission(db),
   "/api/workers": () => getWorkers(db),
   "/api/economy": () => getEconomy(db),
   "/api/policy": () => getPolicy(db),
   "/api/memory": () => getMemory(db),
   "/api/activity": () => getActivity(db),
-  "/api/upstream": () => getUpstream(db),
+  "/api/upstream": () => getLiveUpstream(),
   "/api/system": () => getSystem(db),
+  "/api/observability": () => getObservability(db),
 };
 
 function sendJson(res: import("node:http").ServerResponse, code: number, body: unknown) {
@@ -52,10 +72,13 @@ const server = createServer((req, res) => {
     const url = new URL(req.url, `http://${host}:${port}`);
 
     if (req.method === "GET" && url.pathname === "/health") {
+      const observability = getObservability(db);
       return sendJson(res, 200, {
         ok: true,
         mode: "read-only",
         schemaVersion: getSchemaVersion(db),
+        heartbeat: observability.heartbeat.status,
+        processUptimeSeconds: observability.bridge.processUptimeSeconds,
       });
     }
 
@@ -73,6 +96,7 @@ const server = createServer((req, res) => {
 server.listen(port, host, () => {
   console.log(`[ARYQEN bridge] http://${host}:${port}`);
   console.log("[ARYQEN bridge] Automaton DB is opened read-only + query_only");
+  console.log("[ARYQEN bridge] Live Git upstream checks are read-only (ls-remote; no fetch/merge)");
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
