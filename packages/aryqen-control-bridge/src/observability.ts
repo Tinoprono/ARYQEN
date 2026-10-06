@@ -78,6 +78,26 @@ export function getLiveUpstream() {
   const checkedAt = new Date().toISOString();
   const repoRoot = resolveRepoRoot();
 
+  const unavailableGuard = {
+    status: "UNAVAILABLE",
+    candidateSha: null,
+    trackedSha: null,
+    promotionGate: "UNAVAILABLE",
+    remoteObjectAvailableLocally: false,
+    testsRequired: [
+      "UPSTREAM_BASELINE",
+      "ARYQEN_CONTRACT",
+      "ARYQEN_INTEGRATION",
+      "AUTOMATON_CORE_INTEGRITY",
+    ],
+    mutation: {
+      fetch: false,
+      merge: false,
+      checkout: false,
+    },
+    reason: "Upstream state is not fully available.",
+  };
+
   if (!repoRoot) {
     return {
       status: "UNAVAILABLE",
@@ -91,7 +111,9 @@ export function getLiveUpstream() {
       remoteUrl: null,
       behind: null,
       ahead: null,
+      comparisonBasis: null,
       remoteChanged: null,
+      guard: unavailableGuard,
       error: "ARYQEN Git repository could not be resolved",
     };
   }
@@ -101,6 +123,7 @@ export function getLiveUpstream() {
   const remoteUrl = git(["remote", "get-url", "upstream"], repoRoot, 1200);
   const trackedUpstreamSha = git(["rev-parse", "refs/remotes/upstream/main"], repoRoot, 1200);
 
+  // Network observation only. Deliberately no fetch/merge/checkout.
   const lsRemote = remoteUrl
     ? git(["ls-remote", "upstream", "refs/heads/main"], repoRoot, 5000)
     : null;
@@ -110,15 +133,41 @@ export function getLiveUpstream() {
   const remoteChanged =
     remoteHeadSha && trackedUpstreamSha ? remoteHeadSha !== trackedUpstreamSha : null;
 
+  const remoteObjectAvailableLocally = commitExists(remoteHeadSha, repoRoot);
+
   let behind: number | null = null;
   let ahead: number | null = null;
+  let comparisonBasis:
+    | "REMOTE_HEAD"
+    | "TRACKED_CACHE"
+    | "REMOTE_HEAD_NOT_FETCHED"
+    | null = null;
 
-  const comparisonSha =
-    remoteHeadSha && commitExists(remoteHeadSha, repoRoot) ? remoteHeadSha : trackedUpstreamSha;
+  // Never pretend the cached upstream ref represents a newly detected remote
+  // head. If the live SHA is new but not present locally, commit-distance is
+  // intentionally unknown until a future compatibility-candidate workflow
+  // fetches it in isolation.
+  let comparisonSha: string | null = null;
+  if (remoteHeadSha && remoteObjectAvailableLocally) {
+    comparisonSha = remoteHeadSha;
+    comparisonBasis = "REMOTE_HEAD";
+  } else if (remoteChanged === false && trackedUpstreamSha) {
+    comparisonSha = trackedUpstreamSha;
+    comparisonBasis = "TRACKED_CACHE";
+  } else if (remoteChanged === true) {
+    comparisonBasis = "REMOTE_HEAD_NOT_FETCHED";
+  } else if (trackedUpstreamSha) {
+    comparisonSha = trackedUpstreamSha;
+    comparisonBasis = "TRACKED_CACHE";
+  }
 
   if (comparisonSha && localHead) {
-    behind = numberFromGit(git(["rev-list", "--count", `${localHead}..${comparisonSha}`], repoRoot, 1500));
-    ahead = numberFromGit(git(["rev-list", "--count", `${comparisonSha}..${localHead}`], repoRoot, 1500));
+    behind = numberFromGit(
+      git(["rev-list", "--count", `${localHead}..${comparisonSha}`], repoRoot, 1500),
+    );
+    ahead = numberFromGit(
+      git(["rev-list", "--count", `${comparisonSha}..${localHead}`], repoRoot, 1500),
+    );
   }
 
   let status = "UNAVAILABLE";
@@ -127,6 +176,27 @@ export function getLiveUpstream() {
   } else if (remoteUrl && trackedUpstreamSha) {
     status = "LOCAL_CACHE_ONLY";
   }
+
+  const guardStatus =
+    status === "UPDATE_AVAILABLE"
+      ? "COMPATIBILITY_CHECK_REQUIRED"
+      : status === "SYNCED"
+        ? "CLEAR"
+        : "UNAVAILABLE";
+
+  const promotionGate =
+    guardStatus === "COMPATIBILITY_CHECK_REQUIRED"
+      ? "BLOCKED_PENDING_COMPATIBILITY"
+      : guardStatus === "CLEAR"
+        ? "NO_CANDIDATE"
+        : "UNAVAILABLE";
+
+  const guardReason =
+    guardStatus === "COMPATIBILITY_CHECK_REQUIRED"
+      ? "A new Automaton upstream head is visible. Stable ARYQEN remains pinned until isolated compatibility tests pass."
+      : guardStatus === "CLEAR"
+        ? "Tracked Automaton upstream matches the live remote head. No candidate promotion is required."
+        : "Compatibility state cannot be established from the currently available upstream metadata.";
 
   return {
     status,
@@ -140,8 +210,32 @@ export function getLiveUpstream() {
     remoteUrl,
     behind,
     ahead,
+    comparisonBasis,
     remoteChanged,
-    error: reachable ? null : remoteUrl ? "Live upstream lookup unavailable" : "Missing upstream remote",
+    guard: {
+      status: guardStatus,
+      candidateSha: status === "UPDATE_AVAILABLE" ? remoteHeadSha : null,
+      trackedSha: trackedUpstreamSha,
+      promotionGate,
+      remoteObjectAvailableLocally,
+      testsRequired: [
+        "UPSTREAM_BASELINE",
+        "ARYQEN_CONTRACT",
+        "ARYQEN_INTEGRATION",
+        "AUTOMATON_CORE_INTEGRITY",
+      ],
+      mutation: {
+        fetch: false,
+        merge: false,
+        checkout: false,
+      },
+      reason: guardReason,
+    },
+    error: reachable
+      ? null
+      : remoteUrl
+        ? "Live upstream lookup unavailable"
+        : "Missing upstream remote",
   };
 }
 

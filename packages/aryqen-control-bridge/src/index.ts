@@ -44,6 +44,8 @@ function overview() {
       lastRunAt: observability.heartbeat.lastRunAt,
     },
     upstream: {
+      status: upstream.status,
+      guardStatus: upstream.guard.status,
       behind: upstream.behind,
       checkedAt: upstream.checkedAt,
       healthy: upstream.reachable,
@@ -158,7 +160,8 @@ server.listen(port, host, () => {
   console.log(`[ARYQEN bridge] http://${host}:${port}`);
   console.log("[ARYQEN bridge] Automaton DB is opened read-only + query_only");
   console.log("[ARYQEN bridge] Live Git upstream checks are read-only (ls-remote; no fetch/merge)");
-  console.log("[ARYQEN bridge] V1.7 dependency-aware control: preflight-gated native --run + verified graceful SIGTERM");
+  console.log("[ARYQEN bridge] V1.8 upstream compatibility guard: live SHA detection + promotion gate; no fetch/merge/checkout");
+  console.log("[ARYQEN bridge] V1.7 dependency-aware control remains active: preflight-gated native --run + graceful SIGTERM");
   console.log("[ARYQEN bridge] Conway auth is inspected by presence only; API key values are never exposed.");
   console.log("[ARYQEN bridge] No direct Automaton DB writes. No force-kill. No TINOPRONO access.");
 });

@@ -13,7 +13,13 @@ type Overview = {
   economy: { creditsCents: number | null; todayInferenceCostCents: number };
   heartbeat: { healthy: boolean; lastRunAt: string | null };
   policy: { blockedLast24h: number };
-  upstream: { behind: number | null; checkedAt: string | null; healthy: boolean };
+  upstream: {
+    status: string;
+    guardStatus: string;
+    behind: number | null;
+    checkedAt: string | null;
+    healthy: boolean;
+  };
 };
 
 type Activity = {
@@ -66,7 +72,29 @@ type UpstreamData = {
   remoteUrl: string | null;
   behind: number | null;
   ahead: number | null;
+  comparisonBasis:
+    | "REMOTE_HEAD"
+    | "TRACKED_CACHE"
+    | "REMOTE_HEAD_NOT_FETCHED"
+    | null;
   remoteChanged: boolean | null;
+  guard: {
+    status: "CLEAR" | "COMPATIBILITY_CHECK_REQUIRED" | "UNAVAILABLE";
+    candidateSha: string | null;
+    trackedSha: string | null;
+    promotionGate:
+      | "NO_CANDIDATE"
+      | "BLOCKED_PENDING_COMPATIBILITY"
+      | "UNAVAILABLE";
+    remoteObjectAvailableLocally: boolean;
+    testsRequired: string[];
+    mutation: {
+      fetch: false;
+      merge: false;
+      checkout: false;
+    };
+    reason: string;
+  };
   error: string | null;
 };
 
@@ -181,7 +209,13 @@ const emptyOverview: Overview = {
   economy: { creditsCents: null, todayInferenceCostCents: 0 },
   heartbeat: { healthy: false, lastRunAt: null },
   policy: { blockedLast24h: 0 },
-  upstream: { behind: null, checkedAt: null, healthy: false },
+  upstream: {
+    status: "UNAVAILABLE",
+    guardStatus: "UNAVAILABLE",
+    behind: null,
+    checkedAt: null,
+    healthy: false,
+  },
 };
 
 const emptyActivity: Activity = { events: [], toolCalls: [], turns: [], modifications: [] };
@@ -215,7 +249,27 @@ const emptyUpstream: UpstreamData = {
   remoteUrl: null,
   behind: null,
   ahead: null,
+  comparisonBasis: null,
   remoteChanged: null,
+  guard: {
+    status: "UNAVAILABLE",
+    candidateSha: null,
+    trackedSha: null,
+    promotionGate: "UNAVAILABLE",
+    remoteObjectAvailableLocally: false,
+    testsRequired: [
+      "UPSTREAM_BASELINE",
+      "ARYQEN_CONTRACT",
+      "ARYQEN_INTEGRATION",
+      "AUTOMATON_CORE_INTEGRITY",
+    ],
+    mutation: {
+      fetch: false,
+      merge: false,
+      checkout: false,
+    },
+    reason: "Upstream compatibility state unavailable.",
+  },
   error: null,
 };
 const emptySystem: SystemData = {
@@ -1319,57 +1373,130 @@ function UpstreamView({ data }: { data: UpstreamData }) {
           ? "cyan"
           : "amber";
 
+  const guardTone =
+    data.guard.status === "CLEAR"
+      ? "green"
+      : data.guard.status === "COMPATIBILITY_CHECK_REQUIRED"
+        ? "amber"
+        : "violet";
+
   const shortSha = (sha: string | null) => (sha ? sha.slice(0, 10) : "—");
+  const mutationSafe =
+    !data.guard.mutation.fetch &&
+    !data.guard.mutation.merge &&
+    !data.guard.mutation.checkout;
 
   return (
-    <div className="view-shell">
+    <div className="view-shell upstream-v18">
       <div className="view-stat-grid">
-        <StatCard label="LIVE STATUS" value={data.status.replaceAll("_", " ")} tone={statusTone} />
-        <StatCard label="REMOTE" value={data.reachable ? "REACHABLE" : "UNAVAILABLE"} tone={data.reachable ? "green" : "amber"} />
-        <StatCard label="BEHIND" value={data.behind ?? "—"} />
-        <StatCard label="AHEAD" value={data.ahead ?? "—"} tone="violet" />
+        <StatCard label="UPSTREAM STATUS" value={data.status.replaceAll("_", " ")} tone={statusTone} />
+        <StatCard
+          label="COMPATIBILITY GUARD"
+          value={data.guard.status.replaceAll("_", " ")}
+          tone={guardTone}
+        />
+        <StatCard
+          label="CANDIDATE"
+          value={data.guard.candidateSha ? shortSha(data.guard.candidateSha) : "NONE"}
+          detail={data.guard.candidateSha ? "live upstream SHA" : "no upstream candidate"}
+          tone={data.guard.candidateSha ? "amber" : "cyan"}
+        />
+        <StatCard
+          label="STABLE MUTATION"
+          value={mutationSafe ? "NONE" : "REVIEW"}
+          detail="fetch · merge · checkout"
+          tone={mutationSafe ? "green" : "amber"}
+        />
       </div>
 
       <div className="view-columns two">
-        <Section title="LIVE UPSTREAM" kicker="Read-only Git network check — no fetch, merge or checkout">
+        <Section title="LIVE UPSTREAM" kicker="Remote observation only — ls-remote without repository mutation">
           <div className="detail-grid">
             <div className="detail-item"><span>branch</span><b>{display(data.branch)}</b></div>
             <div className="detail-item"><span>checked at</span><b>{dateTimeLabel(data.checkedAt)}</b></div>
             <div className="detail-item"><span>local head</span><b className="mono-value">{shortSha(data.localHead)}</b></div>
             <div className="detail-item"><span>tracked upstream</span><b className="mono-value">{shortSha(data.trackedUpstreamSha)}</b></div>
-            <div className="detail-item"><span>remote head</span><b className="mono-value">{shortSha(data.remoteHeadSha)}</b></div>
+            <div className="detail-item"><span>live remote head</span><b className="mono-value">{shortSha(data.remoteHeadSha)}</b></div>
             <div className="detail-item"><span>remote changed</span><b>{data.remoteChanged == null ? "—" : data.remoteChanged ? "YES" : "NO"}</b></div>
+            <div className="detail-item"><span>comparison basis</span><b>{display(data.comparisonBasis)}</b></div>
+            <div className="detail-item"><span>remote object local</span><b>{data.guard.remoteObjectAvailableLocally ? "YES" : "NO"}</b></div>
           </div>
         </Section>
 
-        <Section title="UPSTREAM POLICY" kicker="Upstream-first compatibility guard">
+        <Section title="COMPATIBILITY GATE" kicker="Stable ARYQEN never promotes an upstream change before verification">
           <div className="upstream-policy">
-            <div className={`upstream-signal ${data.status.toLowerCase()}`}>
+            <div className={`upstream-signal ${data.guard.status.toLowerCase()}`}>
               <i />
               <div>
-                <b>{data.status.replaceAll("_", " ")}</b>
-                <span>
-                  {data.status === "SYNCED"
-                    ? "The locally tracked Automaton upstream matches the live remote head."
-                    : data.status === "UPDATE_AVAILABLE"
-                      ? "A newer Automaton upstream head is visible. No code has been fetched or merged."
-                      : data.error ?? "Upstream state is not fully available."}
-                </span>
+                <b>{data.guard.status.replaceAll("_", " ")}</b>
+                <span>{data.guard.reason}</span>
               </div>
             </div>
+
+            <div className="guard-gate">
+              <span>PROMOTION GATE</span>
+              <b>{data.guard.promotionGate.replaceAll("_", " ")}</b>
+            </div>
+
             <div className="policy-note">
-              ARYQEN only observes the remote here. Promotion remains gated by compatibility tests.
+              A detected remote SHA is only a candidate. No update reaches the stable runtime until the required
+              compatibility suite is green.
             </div>
           </div>
         </Section>
       </div>
 
-      <Section title="REMOTE IDENTITY" kicker="Git source currently configured as Automaton upstream">
+      <Section title="UPGRADE STATE MACHINE" kicker="Upstream-first promotion path">
+        <div className="upgrade-flow">
+          {[
+            ["DETECTED", data.status === "UPDATE_AVAILABLE"],
+            ["CANDIDATE", Boolean(data.guard.candidateSha)],
+            ["COMPATIBILITY TESTS", data.guard.status === "COMPATIBILITY_CHECK_REQUIRED"],
+            ["READY", false],
+            ["PROMOTED", false],
+          ].map(([label, active], index) => (
+            <React.Fragment key={String(label)}>
+              <div className={`upgrade-step ${active ? "active" : ""}`}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <b>{String(label)}</b>
+              </div>
+              {index < 4 && <i className="upgrade-arrow">→</i>}
+            </React.Fragment>
+          ))}
+        </div>
+      </Section>
+
+      <div className="view-columns two">
+        <Section title="REQUIRED COMPATIBILITY SUITE" kicker="Checks required before any candidate can be promoted">
+          <div className="compat-test-grid">
+            {data.guard.testsRequired.map((test) => (
+              <div className="compat-test" key={test}>
+                <i />
+                <span>{test.replaceAll("_", " ")}</span>
+                <b>{data.guard.status === "COMPATIBILITY_CHECK_REQUIRED" ? "REQUIRED" : "STANDBY"}</b>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Section title="IMMUTABILITY ENVELOPE" kicker="What this live guard is explicitly forbidden to do">
+          <div className="immutability-grid">
+            <div><span>git fetch</span><b>{data.guard.mutation.fetch ? "ENABLED" : "DISABLED"}</b></div>
+            <div><span>git merge</span><b>{data.guard.mutation.merge ? "ENABLED" : "DISABLED"}</b></div>
+            <div><span>git checkout</span><b>{data.guard.mutation.checkout ? "ENABLED" : "DISABLED"}</b></div>
+            <div><span>stable runtime mutation</span><b>NONE</b></div>
+          </div>
+        </Section>
+      </div>
+
+      <Section title="REMOTE IDENTITY" kicker="Git source configured as Automaton upstream">
         <div className="detail-grid">
           <div className="detail-item"><span>remote url</span><b>{display(data.remoteUrl, 160)}</b></div>
           <div className="detail-item"><span>repository root</span><b>{display(data.repoRoot, 160)}</b></div>
           <div className="detail-item"><span>live lookup</span><b>{data.reachable ? "READ-ONLY LS-REMOTE PASS" : "UNAVAILABLE"}</b></div>
-          <div className="detail-item"><span>mutation</span><b>NONE</b></div>
+          <div className="detail-item"><span>working tree mutation</span><b>NONE</b></div>
+          <div className="detail-item"><span>ahead</span><b>{data.ahead ?? "—"}</b></div>
+          <div className="detail-item"><span>behind</span><b>{data.behind ?? "—"}</b></div>
         </div>
       </Section>
     </div>
@@ -1612,11 +1739,13 @@ function App() {
           <span>
             UPSTREAM{" "}
             <b>
-              {o.upstream.behind == null
-                ? "UNKNOWN"
-                : o.upstream.behind === 0
-                  ? "SYNCED"
-                  : `${o.upstream.behind} BEHIND`}
+              {o.upstream.guardStatus === "COMPATIBILITY_CHECK_REQUIRED"
+                ? "CHECK REQUIRED"
+                : o.upstream.status === "UPDATE_AVAILABLE"
+                  ? "UPDATE AVAILABLE"
+                  : o.upstream.status === "SYNCED"
+                    ? "SYNCED"
+                    : o.upstream.status.replaceAll("_", " ")}
             </b>
           </span>
           <span>ACCESS <b>CONTROL GATED</b></span>
@@ -1632,8 +1761,8 @@ function App() {
         </motion.div>
 
         <footer className="footer-line">
-          <span>ARYQEN CONTROL / V1.7</span>
-          <span>DEPENDENCY-AWARE CONTROL · LOCAL</span>
+          <span>ARYQEN CONTROL / V1.8</span>
+          <span>UPSTREAM COMPATIBILITY GUARD · LOCAL</span>
           <span>{new Date().toLocaleDateString()}</span>
         </footer>
       </section>
