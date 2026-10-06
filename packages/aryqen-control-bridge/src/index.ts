@@ -18,6 +18,10 @@ import {
   startManagedRuntime,
   stopManagedRuntime,
 } from "./control-plane.js";
+import {
+  getCandidateStatus,
+  prepareUpstreamCandidate,
+} from "./candidate-upgrade.js";
 
 const dbPath = process.env.AUTOMATON_DB_PATH;
 if (!dbPath) throw new Error("AUTOMATON_DB_PATH is required");
@@ -62,6 +66,7 @@ const routes: Record<string, () => unknown> = {
   "/api/memory": () => getMemory(db),
   "/api/activity": () => getActivity(db),
   "/api/upstream": () => getLiveUpstream(),
+  "/api/upstream/candidate": () => getCandidateStatus(),
   "/api/system": () => getSystem(db),
   "/api/observability": () => getObservability(db),
   "/api/control/status": () => getControlStatus(),
@@ -145,6 +150,18 @@ const server = createServer(async (req, res) => {
       return sendJson(res, result.ok ? 200 : 409, result);
     }
 
+    if (req.method === "POST" && url.pathname === "/api/upstream/candidate/prepare") {
+      if (!controlRequestAllowed(req)) {
+        return sendJson(res, 403, { error: "candidate_request_rejected" });
+      }
+      if (req.headers["x-aryqen-confirm"] !== "PREPARE_UPSTREAM_CANDIDATE") {
+        return sendJson(res, 409, { error: "explicit_confirmation_required" });
+      }
+
+      const result = await prepareUpstreamCandidate();
+      return sendJson(res, result.ok ? 200 : 409, result);
+    }
+
     const handler = req.method === "GET" ? routes[url.pathname] : undefined;
     if (!handler) return sendJson(res, 404, { error: "not_found" });
     return sendJson(res, 200, handler());
@@ -160,7 +177,9 @@ server.listen(port, host, () => {
   console.log(`[ARYQEN bridge] http://${host}:${port}`);
   console.log("[ARYQEN bridge] Automaton DB is opened read-only + query_only");
   console.log("[ARYQEN bridge] Live Git upstream checks are read-only (ls-remote; no fetch/merge)");
-  console.log("[ARYQEN bridge] V1.8 upstream compatibility guard: live SHA detection + promotion gate; no fetch/merge/checkout");
+  console.log("[ARYQEN bridge] V1.9 candidate pipeline: isolated upstream staging under ~/.aryqen/candidates; stable repo immutable");
+  console.log("[ARYQEN bridge] Candidate source can be fetched in isolation; upstream code execution remains blocked without sandbox");
+  console.log("[ARYQEN bridge] V1.8 upstream compatibility guard remains active: live SHA detection + promotion gate");
   console.log("[ARYQEN bridge] V1.7 dependency-aware control remains active: preflight-gated native --run + graceful SIGTERM");
   console.log("[ARYQEN bridge] Conway auth is inspected by presence only; API key values are never exposed.");
   console.log("[ARYQEN bridge] No direct Automaton DB writes. No force-kill. No TINOPRONO access.");

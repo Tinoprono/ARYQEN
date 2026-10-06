@@ -98,6 +98,30 @@ type UpstreamData = {
   error: string | null;
 };
 
+type CandidateData = {
+  schemaVersion: 1;
+  status: "IDLE" | "PREPARING" | "PREPARED_WAITING_SANDBOX" | "FAILED";
+  candidateSha: string | null;
+  sourceRemote: string | null;
+  candidatePath: string | null;
+  preparedAt: string | null;
+  verifiedHead: string | null;
+  stableHeadBefore: string | null;
+  stableHeadAfter: string | null;
+  stableWorktreeUnchanged: boolean | null;
+  executionPolicy: "NO_UPSTREAM_CODE_EXECUTION_WITHOUT_SANDBOX";
+  testExecution: "NOT_STARTED" | "BLOCKED_NO_SANDBOX";
+  checks: Array<{
+    id: string;
+    status: "PASS" | "STANDBY" | "BLOCKED_NO_SANDBOX" | "FAIL";
+    detail: string;
+  }>;
+  error: string | null;
+  stableMutationAllowed: false;
+  candidateWorkspaceRoot: string;
+  auditPath: string;
+};
+
 type SystemData = {
   schemaVersion: number | string | null;
   agentState: string;
@@ -272,6 +296,34 @@ const emptyUpstream: UpstreamData = {
   },
   error: null,
 };
+const emptyCandidate: CandidateData = {
+  schemaVersion: 1,
+  status: "IDLE",
+  candidateSha: null,
+  sourceRemote: null,
+  candidatePath: null,
+  preparedAt: null,
+  verifiedHead: null,
+  stableHeadBefore: null,
+  stableHeadAfter: null,
+  stableWorktreeUnchanged: null,
+  executionPolicy: "NO_UPSTREAM_CODE_EXECUTION_WITHOUT_SANDBOX",
+  testExecution: "NOT_STARTED",
+  checks: [
+    { id: "SOURCE_CAPTURE", status: "STANDBY", detail: "Waiting for an upstream candidate." },
+    { id: "SHA_VERIFICATION", status: "STANDBY", detail: "Candidate commit has not been verified yet." },
+    { id: "STABLE_REPO_IMMUTABILITY", status: "STANDBY", detail: "Stable repository has not been compared yet." },
+    { id: "UPSTREAM_BASELINE", status: "BLOCKED_NO_SANDBOX", detail: "Execution requires an isolated sandbox." },
+    { id: "ARYQEN_CONTRACT", status: "BLOCKED_NO_SANDBOX", detail: "Execution requires an isolated sandbox." },
+    { id: "ARYQEN_INTEGRATION", status: "BLOCKED_NO_SANDBOX", detail: "Execution requires an isolated sandbox." },
+    { id: "AUTOMATON_CORE_INTEGRITY", status: "BLOCKED_NO_SANDBOX", detail: "Execution requires an isolated sandbox." },
+  ],
+  error: null,
+  stableMutationAllowed: false,
+  candidateWorkspaceRoot: "",
+  auditPath: "",
+};
+
 const emptySystem: SystemData = {
   schemaVersion: null,
   agentState: "setup",
@@ -1363,7 +1415,19 @@ function SecurityView({ data }: { data: PolicyData }) {
   );
 }
 
-function UpstreamView({ data }: { data: UpstreamData }) {
+function UpstreamView({
+  data,
+  candidate,
+  candidateConnected,
+}: {
+  data: UpstreamData;
+  candidate: CandidateData;
+  candidateConnected: boolean;
+}) {
+  const [confirmPrepare, setConfirmPrepare] = React.useState(false);
+  const [preparing, setPreparing] = React.useState(false);
+  const [prepareResult, setPrepareResult] = React.useState<string | null>(null);
+
   const statusTone =
     data.status === "SYNCED"
       ? "green"
@@ -1380,37 +1444,113 @@ function UpstreamView({ data }: { data: UpstreamData }) {
         ? "amber"
         : "violet";
 
+  const candidateTone =
+    candidate.status === "PREPARED_WAITING_SANDBOX"
+      ? "green"
+      : candidate.status === "FAILED"
+        ? "amber"
+        : data.guard.status === "COMPATIBILITY_CHECK_REQUIRED" && Boolean(data.guard.candidateSha && data.remoteUrl)
+          ? "amber"
+          : "cyan";
+
   const shortSha = (sha: string | null) => (sha ? sha.slice(0, 10) : "—");
   const mutationSafe =
     !data.guard.mutation.fetch &&
     !data.guard.mutation.merge &&
     !data.guard.mutation.checkout;
 
+  const prepareCandidate = async () => {
+    setPreparing(true);
+    setPrepareResult(null);
+    try {
+      const response = await fetch("/api/upstream/candidate/prepare", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-aryqen-confirm": "PREPARE_UPSTREAM_CANDIDATE",
+        },
+        body: "{}",
+      });
+      const payload = (await response.json()) as { message?: string; code?: string };
+      setPrepareResult(payload.message ?? payload.code ?? `HTTP ${response.status}`);
+    } catch {
+      setPrepareResult("Candidate request failed: bridge unavailable.");
+    } finally {
+      setPreparing(false);
+      setConfirmPrepare(false);
+    }
+  };
+
+  const detectedSha = data.guard.candidateSha;
+  const candidateEligible =
+    data.guard.status === "COMPATIBILITY_CHECK_REQUIRED" &&
+    Boolean(detectedSha && data.remoteUrl);
+  const alreadyStaged =
+    candidate.status === "PREPARED_WAITING_SANDBOX" &&
+    candidate.candidateSha === detectedSha;
+  const prepareDisabled =
+    !candidateConnected || !candidateEligible || preparing || alreadyStaged;
+
   return (
-    <div className="view-shell upstream-v18">
+    <div className="view-shell upstream-v18 upstream-v19">
       <div className="view-stat-grid">
         <StatCard label="UPSTREAM STATUS" value={data.status.replaceAll("_", " ")} tone={statusTone} />
+        <StatCard label="COMPATIBILITY GUARD" value={data.guard.status.replaceAll("_", " ")} tone={guardTone} />
         <StatCard
-          label="COMPATIBILITY GUARD"
-          value={data.guard.status.replaceAll("_", " ")}
-          tone={guardTone}
-        />
-        <StatCard
-          label="CANDIDATE"
-          value={data.guard.candidateSha ? shortSha(data.guard.candidateSha) : "NONE"}
-          detail={data.guard.candidateSha ? "live upstream SHA" : "no upstream candidate"}
-          tone={data.guard.candidateSha ? "amber" : "cyan"}
+          label="CANDIDATE PIPELINE"
+          value={candidate.status.replaceAll("_", " ")}
+          detail={candidate.candidateSha ? shortSha(candidate.candidateSha) : candidateEligible ? "candidate detected" : "no candidate staged"}
+          tone={candidateTone}
         />
         <StatCard
           label="STABLE MUTATION"
-          value={mutationSafe ? "NONE" : "REVIEW"}
-          detail="fetch · merge · checkout"
-          tone={mutationSafe ? "green" : "amber"}
+          value={mutationSafe && !candidate.stableMutationAllowed ? "NONE" : "REVIEW"}
+          detail="stable repository remains pinned"
+          tone={mutationSafe && !candidate.stableMutationAllowed ? "green" : "amber"}
         />
       </div>
 
+      <Section title="CANDIDATE UPGRADE PIPELINE" kicker="Exact upstream SHA staged outside the stable repository · no candidate code execution on host">
+        <div className="candidate-pipeline">
+          <div className="candidate-summary">
+            <div><span>DETECTED SHA</span><b className="mono-value">{shortSha(detectedSha)}</b></div>
+            <div><span>STAGED SHA</span><b className="mono-value">{shortSha(candidate.candidateSha)}</b></div>
+            <div><span>VERIFIED HEAD</span><b className="mono-value">{shortSha(candidate.verifiedHead)}</b></div>
+            <div><span>STABLE WORKTREE</span><b>{candidate.stableWorktreeUnchanged == null ? "NOT CHECKED" : candidate.stableWorktreeUnchanged ? "UNCHANGED" : "CHANGED"}</b></div>
+            <div><span>TEST EXECUTION</span><b>{candidate.testExecution.replaceAll("_", " ")}</b></div>
+          </div>
+
+          <div className="candidate-action-row">
+            <div>
+              <b>ISOLATED SOURCE STAGING</b>
+              <p>Candidate Git operations are confined to <code>~/.aryqen/candidates</code>. Stable ARYQEN receives no fetch, merge or checkout.</p>
+            </div>
+            {confirmPrepare ? (
+              <div className="confirm-row">
+                <button className="control-button confirm" disabled={preparing} onClick={() => void prepareCandidate()}>{preparing ? "PREPARING…" : "CONFIRM PREPARE"}</button>
+                <button className="control-button ghost" disabled={preparing} onClick={() => setConfirmPrepare(false)}>CANCEL</button>
+              </div>
+            ) : (
+              <button className="control-button candidate-button" disabled={prepareDisabled} onClick={() => setConfirmPrepare(true)}>
+                {!candidateConnected ? "OFFLINE" : alreadyStaged ? "STAGED" : candidateEligible ? "PREPARE" : "NO CANDIDATE"}
+              </button>
+            )}
+          </div>
+
+          <div className="candidate-execution-policy">
+            <i />
+            <div>
+              <b>NO UPSTREAM CODE EXECUTION WITHOUT SANDBOX</b>
+              <span>V1.9 captures and verifies source only. Build/tests remain blocked until ARYQEN has an isolated compatibility runner.</span>
+            </div>
+          </div>
+          {prepareResult && <div className="control-result">{prepareResult}</div>}
+          {candidate.error && <div className="candidate-error">{candidate.error}</div>}
+        </div>
+      </Section>
+
       <div className="view-columns two">
-        <Section title="LIVE UPSTREAM" kicker="Remote observation only — ls-remote without repository mutation">
+        <Section title="LIVE UPSTREAM" kicker="Remote observation only — ls-remote without stable repository mutation">
           <div className="detail-grid">
             <div className="detail-item"><span>branch</span><b>{display(data.branch)}</b></div>
             <div className="detail-item"><span>checked at</span><b>{dateTimeLabel(data.checkedAt)}</b></div>
@@ -1425,23 +1565,9 @@ function UpstreamView({ data }: { data: UpstreamData }) {
 
         <Section title="COMPATIBILITY GATE" kicker="Stable ARYQEN never promotes an upstream change before verification">
           <div className="upstream-policy">
-            <div className={`upstream-signal ${data.guard.status.toLowerCase()}`}>
-              <i />
-              <div>
-                <b>{data.guard.status.replaceAll("_", " ")}</b>
-                <span>{data.guard.reason}</span>
-              </div>
-            </div>
-
-            <div className="guard-gate">
-              <span>PROMOTION GATE</span>
-              <b>{data.guard.promotionGate.replaceAll("_", " ")}</b>
-            </div>
-
-            <div className="policy-note">
-              A detected remote SHA is only a candidate. No update reaches the stable runtime until the required
-              compatibility suite is green.
-            </div>
+            <div className={`upstream-signal ${data.guard.status.toLowerCase()}`}><i /><div><b>{data.guard.status.replaceAll("_", " ")}</b><span>{data.guard.reason}</span></div></div>
+            <div className="guard-gate"><span>PROMOTION GATE</span><b>{data.guard.promotionGate.replaceAll("_", " ")}</b></div>
+            <div className="policy-note">A detected remote SHA is only a candidate. V1.9 may stage its source in isolation, but it cannot promote it and cannot execute upstream code on the host.</div>
           </div>
         </Section>
       </div>
@@ -1450,16 +1576,13 @@ function UpstreamView({ data }: { data: UpstreamData }) {
         <div className="upgrade-flow">
           {[
             ["DETECTED", data.status === "UPDATE_AVAILABLE"],
-            ["CANDIDATE", Boolean(data.guard.candidateSha)],
-            ["COMPATIBILITY TESTS", data.guard.status === "COMPATIBILITY_CHECK_REQUIRED"],
+            ["CANDIDATE", candidate.status === "PREPARING" || candidate.status === "PREPARED_WAITING_SANDBOX"],
+            ["COMPATIBILITY TESTS", candidate.status === "PREPARED_WAITING_SANDBOX"],
             ["READY", false],
             ["PROMOTED", false],
           ].map(([label, active], index) => (
             <React.Fragment key={String(label)}>
-              <div className={`upgrade-step ${active ? "active" : ""}`}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <b>{String(label)}</b>
-              </div>
+              <div className={`upgrade-step ${active ? "active" : ""}`}><span>{String(index + 1).padStart(2, "0")}</span><b>{String(label)}</b></div>
               {index < 4 && <i className="upgrade-arrow">→</i>}
             </React.Fragment>
           ))}
@@ -1467,29 +1590,40 @@ function UpstreamView({ data }: { data: UpstreamData }) {
       </Section>
 
       <div className="view-columns two">
-        <Section title="REQUIRED COMPATIBILITY SUITE" kicker="Checks required before any candidate can be promoted">
-          <div className="compat-test-grid">
-            {data.guard.testsRequired.map((test) => (
-              <div className="compat-test" key={test}>
-                <i />
-                <span>{test.replaceAll("_", " ")}</span>
-                <b>{data.guard.status === "COMPATIBILITY_CHECK_REQUIRED" ? "REQUIRED" : "STANDBY"}</b>
+        <Section title="CANDIDATE VERIFICATION" kicker="Static checks are allowed; runtime execution remains sandbox-gated">
+          <div className="candidate-check-grid">
+            {candidate.checks.map((check) => (
+              <div className={`candidate-check check-${check.status.toLowerCase()}`} key={check.id}>
+                <i /><div><span>{check.id.replaceAll("_", " ")}</span><p>{check.detail}</p></div><b>{check.status.replaceAll("_", " ")}</b>
               </div>
             ))}
           </div>
         </Section>
 
-        <Section title="IMMUTABILITY ENVELOPE" kicker="What this live guard is explicitly forbidden to do">
+        <Section title="IMMUTABILITY ENVELOPE" kicker="Stable repository and runtime boundaries">
           <div className="immutability-grid">
-            <div><span>git fetch</span><b>{data.guard.mutation.fetch ? "ENABLED" : "DISABLED"}</b></div>
-            <div><span>git merge</span><b>{data.guard.mutation.merge ? "ENABLED" : "DISABLED"}</b></div>
-            <div><span>git checkout</span><b>{data.guard.mutation.checkout ? "ENABLED" : "DISABLED"}</b></div>
+            <div><span>stable git fetch</span><b>DISABLED</b></div>
+            <div><span>stable git merge</span><b>DISABLED</b></div>
+            <div><span>stable git checkout</span><b>DISABLED</b></div>
+            <div><span>candidate source fetch</span><b>ISOLATED ONLY</b></div>
+            <div><span>candidate code execution</span><b>BLOCKED</b></div>
             <div><span>stable runtime mutation</span><b>NONE</b></div>
           </div>
         </Section>
       </div>
 
-      <Section title="REMOTE IDENTITY" kicker="Git source configured as Automaton upstream">
+      <Section title="CANDIDATE IDENTITY" kicker="Persisted candidate metadata — no secret material">
+        <div className="detail-grid">
+          <div className="detail-item"><span>source remote</span><b>{display(candidate.sourceRemote ?? data.remoteUrl, 160)}</b></div>
+          <div className="detail-item"><span>candidate workspace</span><b>{display(candidate.candidatePath, 160)}</b></div>
+          <div className="detail-item"><span>prepared at</span><b>{dateTimeLabel(candidate.preparedAt)}</b></div>
+          <div className="detail-item"><span>execution policy</span><b>{candidate.executionPolicy.replaceAll("_", " ")}</b></div>
+          <div className="detail-item"><span>stable head before</span><b className="mono-value">{shortSha(candidate.stableHeadBefore)}</b></div>
+          <div className="detail-item"><span>stable head after</span><b className="mono-value">{shortSha(candidate.stableHeadAfter)}</b></div>
+        </div>
+      </Section>
+
+      <Section title="REMOTE IDENTITY" kicker="Git source currently configured as Automaton upstream">
         <div className="detail-grid">
           <div className="detail-item"><span>remote url</span><b>{display(data.remoteUrl, 160)}</b></div>
           <div className="detail-item"><span>repository root</span><b>{display(data.repoRoot, 160)}</b></div>
@@ -1623,6 +1757,7 @@ function App() {
   const economyPoll = usePolling<EconomyData>("/api/economy", emptyEconomy, 2800);
   const policyPoll = usePolling<PolicyData>("/api/policy", emptyPolicy, 2200);
   const upstreamPoll = usePolling<UpstreamData>("/api/upstream", emptyUpstream, 5000);
+  const candidatePoll = usePolling<CandidateData>("/api/upstream/candidate", emptyCandidate, 2500);
   const systemPoll = usePolling<SystemData>("/api/system", emptySystem, 3000);
   const observabilityPoll = usePolling<ObservabilityData>("/api/observability", emptyObservability, 1800);
   const controlStatusPoll = usePolling<ControlStatusData>("/api/control/status", emptyControlStatus, 1200);
@@ -1653,7 +1788,13 @@ function App() {
       case "security":
         return <SecurityView data={policyPoll.data} />;
       case "upstream":
-        return <UpstreamView data={upstreamPoll.data} />;
+        return (
+          <UpstreamView
+            data={upstreamPoll.data}
+            candidate={candidatePoll.data}
+            candidateConnected={candidatePoll.connected}
+          />
+        );
       case "system":
         return <SystemView data={systemPoll.data} overview={o} observability={observabilityPoll.data} />;
       case "control":
@@ -1761,8 +1902,8 @@ function App() {
         </motion.div>
 
         <footer className="footer-line">
-          <span>ARYQEN CONTROL / V1.8</span>
-          <span>UPSTREAM COMPATIBILITY GUARD · LOCAL</span>
+          <span>ARYQEN CONTROL / V1.9</span>
+          <span>ISOLATED CANDIDATE PIPELINE · LOCAL</span>
           <span>{new Date().toLocaleDateString()}</span>
         </footer>
       </section>

@@ -2259,3 +2259,39 @@ h1 span {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ────────────────────────────────────────────────────────────────
+   ARYQEN CONTROL V1.9 — isolated upstream candidate pipeline
+   ──────────────────────────────────────────────────────────────── */
+
+.candidate-pipeline { display: grid; gap: 10px; }
+.candidate-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.candidate-summary > div { min-height: 66px; display: grid; align-content: center; gap: 7px; padding: 10px 11px; border: 1px solid rgba(73,192,233,.075); background: rgba(4,15,26,.34); }
+.candidate-summary span { color: #456978; font-size: 7px; letter-spacing: .12em; }
+.candidate-summary b { color: #9cc4cf; font-size: 8px; font-weight: 600; letter-spacing: .06em; overflow-wrap: anywhere; }
+.candidate-action-row { min-height: 84px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 18px; padding: 13px 14px; border: 1px solid rgba(81,197,235,.09); background: linear-gradient(90deg,rgba(7,25,40,.48),rgba(8,15,32,.32)); }
+.candidate-action-row > div:first-child > b { display: block; color: #91d7e3; font-size: 9px; letter-spacing: .11em; margin-bottom: 6px; }
+.candidate-action-row p { margin: 0; max-width: 800px; color: #567a87; font-size: 8px; line-height: 1.5; }
+.candidate-action-row code { color: #6fc8da; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size: 8px; }
+.candidate-button { min-width: 112px; }
+.candidate-execution-policy { display: grid; grid-template-columns: 10px 1fr; align-items: center; gap: 11px; padding: 12px 13px; border: 1px solid rgba(255,178,103,.11); background: rgba(57,33,15,.12); }
+.candidate-execution-policy > i { width: 7px; height: 7px; border-radius: 50%; background: #ffb267; box-shadow: 0 0 10px rgba(255,178,103,.40); }
+.candidate-execution-policy b { display: block; color: #c99a6d; font-size: 8px; letter-spacing: .10em; margin-bottom: 5px; }
+.candidate-execution-policy span { display: block; color: #796650; font-size: 8px; line-height: 1.45; }
+.candidate-error { padding: 10px 12px; border: 1px solid rgba(202,78,97,.15); background: rgba(90,27,39,.10); color: #ba727c; font-size: 8px; }
+.candidate-check-grid { display: grid; gap: 7px; }
+.candidate-check { min-height: 58px; display: grid; grid-template-columns: 7px 1fr auto; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid rgba(73,192,233,.07); background: rgba(4,15,26,.34); }
+.candidate-check > i { width: 5px; height: 5px; border-radius: 50%; background: #596d76; }
+.candidate-check span { display: block; color: #789daa; font-size: 8px; letter-spacing: .07em; }
+.candidate-check p { margin: 4px 0 0; color: #4c6b77; font-size: 7px; line-height: 1.35; }
+.candidate-check > b { color: #71858d; font-size: 6px; letter-spacing: .09em; text-align: right; }
+.candidate-check.check-pass > i { background: #4fffd0; box-shadow: 0 0 8px rgba(79,255,208,.48); }
+.candidate-check.check-pass > b { color: #4fd1b2; }
+.candidate-check.check-blocked_no_sandbox > i { background: #ffb267; box-shadow: 0 0 8px rgba(255,178,103,.34); }
+.candidate-check.check-blocked_no_sandbox > b { color: #a67b54; }
+.candidate-check.check-fail > i { background: #d65b70; box-shadow: 0 0 8px rgba(214,91,112,.42); }
+.candidate-check.check-fail > b { color: #c57682; }
+@media (max-width:1180px){ .candidate-summary{grid-template-columns:repeat(3,minmax(0,1fr));} }
+@media (max-width:760px){ .candidate-summary{grid-template-columns:1fr 1fr;} .candidate-action-row{grid-template-columns:1fr;} }
+@media (max-width:520px){ .candidate-summary{grid-template-columns:1fr;} }
