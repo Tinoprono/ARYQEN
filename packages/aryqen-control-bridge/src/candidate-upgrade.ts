@@ -258,9 +258,20 @@ function preparedChecks(
 }
 
 export function getCandidateStatus() {
+  const upstream = getLiveUpstream();
   const state = readState();
+  const detectedSha = upstream.guard.candidateSha;
+  const eligible =
+    upstream.guard.status === "COMPATIBILITY_CHECK_REQUIRED" &&
+    validSha(detectedSha) &&
+    Boolean(upstream.remoteUrl);
+
   return {
     ...state,
+    eligible,
+    detectedSha,
+    upstreamGuard: upstream.guard.status,
+    promotionGate: upstream.guard.promotionGate,
     stableMutationAllowed: false,
     candidateWorkspaceRoot: candidatesRoot,
     auditPath,
