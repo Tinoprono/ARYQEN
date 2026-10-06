@@ -119,6 +119,24 @@ type ObservabilityData = {
 
 type ControlStatusData = {
   mode: string;
+  preflight: {
+    status: "READY" | "BLOCKED";
+    runtimeReady: boolean;
+    configPresent: boolean;
+    buildReady: boolean;
+    apiKeyPresent: boolean;
+    apiKeySource: "ENV" | "AUTOMATON_CONFIG" | "PROVISION_CONFIG" | null;
+    blocker:
+      | "REPO_NOT_FOUND"
+      | "RUNTIME_BUILD_MISSING"
+      | "CONWAY_API_KEY_MISSING"
+      | null;
+    dependency: {
+      name: "CONWAY_AUTH";
+      nativeProvisionCommand: "--provision";
+      upstreamOwned: true;
+    };
+  };
   runtime: {
     state: "STOPPED" | "RUNNING_MANAGED" | "RUNNING_UNMANAGED";
     running: boolean;
@@ -245,6 +263,20 @@ const emptyObservability: ObservabilityData = {
 
 const emptyControlStatus: ControlStatusData = {
   mode: "BOUNDED_LOCAL_CONTROL",
+  preflight: {
+    status: "BLOCKED",
+    runtimeReady: false,
+    configPresent: false,
+    buildReady: false,
+    apiKeyPresent: false,
+    apiKeySource: null,
+    blocker: "REPO_NOT_FOUND",
+    dependency: {
+      name: "CONWAY_AUTH",
+      nativeProvisionCommand: "--provision",
+      upstreamOwned: true,
+    },
+  },
   runtime: {
     state: "STOPPED",
     running: false,
@@ -674,20 +706,74 @@ function ControlPlane({
     }
   };
 
+  const dependencyBlocked = connected && !status.preflight.runtimeReady;
   const runtimeLabel = !connected
     ? "BRIDGE OFFLINE"
-    : status.runtime.state.replaceAll("_", " ");
+    : status.runtime.running
+      ? status.runtime.state.replaceAll("_", " ")
+      : dependencyBlocked
+        ? status.preflight.blocker === "CONWAY_API_KEY_MISSING"
+          ? "AUTH BLOCKED"
+          : "PREFLIGHT BLOCKED"
+        : "STOPPED";
+
+  const blockerCopy =
+    status.preflight.blocker === "CONWAY_API_KEY_MISSING"
+      ? "Conway API key is missing. ARYQEN blocks START before spawning Automaton."
+      : status.preflight.blocker === "RUNTIME_BUILD_MISSING"
+        ? "Automaton runtime build is missing. Build must pass before START is available."
+        : status.preflight.blocker === "REPO_NOT_FOUND"
+          ? "ARYQEN cannot resolve the Automaton repository root."
+          : "Runtime prerequisites are satisfied.";
 
   return (
     <section className="control-plane panel">
       <div className="panel-head">
         <div>
           <div className="panel-title">SAFE CONTROL PLANE</div>
-          <div className="panel-kicker">Native Automaton lifecycle · explicit confirmation · local only</div>
+          <div className="panel-kicker">Dependency-aware preflight · native Automaton lifecycle · local only</div>
         </div>
-        <div className={`control-runtime-state ${status.runtime.running ? "running" : ""}`}>
+        <div
+          className={`control-runtime-state ${
+            status.runtime.running ? "running" : dependencyBlocked ? "blocked" : ""
+          }`}
+        >
           <i />
           {runtimeLabel}
+        </div>
+      </div>
+
+      <div className={`dependency-gate ${status.preflight.runtimeReady ? "ready" : "blocked"}`}>
+        <div className="dependency-identity">
+          <span>UPSTREAM DEPENDENCY</span>
+          <b>CONWAY AUTH</b>
+          <p>Runtime authentication remains owned by Automaton / Conway upstream.</p>
+        </div>
+
+        <div className="dependency-metric">
+          <span>CONFIG</span>
+          <b>{connected ? (status.preflight.configPresent ? "PRESENT" : "MISSING") : "—"}</b>
+        </div>
+
+        <div className="dependency-metric">
+          <span>RUNTIME BUILD</span>
+          <b>{connected ? (status.preflight.buildReady ? "READY" : "MISSING") : "—"}</b>
+        </div>
+
+        <div className="dependency-metric">
+          <span>CONWAY API KEY</span>
+          <b>{connected ? (status.preflight.apiKeyPresent ? "PRESENT" : "MISSING") : "—"}</b>
+          {status.preflight.apiKeySource && <em>{status.preflight.apiKeySource.replaceAll("_", " ")}</em>}
+        </div>
+
+        <div className="dependency-metric">
+          <span>START GATE</span>
+          <b>{connected ? status.preflight.status : "—"}</b>
+        </div>
+
+        <div className="dependency-detail">
+          <span>{blockerCopy}</span>
+          <code>native provisioning: {status.preflight.dependency.nativeProvisionCommand}</code>
         </div>
       </div>
 
@@ -697,7 +783,9 @@ function ControlPlane({
             <span className="control-action-index">01</span>
             <div>
               <b>START RUNTIME</b>
-              <p>Launches the native Automaton <code>--run</code> entry point.</p>
+              <p>
+                Launches native Automaton <code>--run</code> only after the local preflight gate is READY.
+              </p>
             </div>
 
             {confirmAction === "start" ? (
@@ -715,7 +803,7 @@ function ControlPlane({
                 disabled={!connected || !status.capabilities.start || busy}
                 onClick={() => setConfirmAction("start")}
               >
-                START
+                {!connected ? "OFFLINE" : status.preflight.runtimeReady ? "START" : "BLOCKED"}
               </button>
             )}
           </div>
@@ -758,6 +846,7 @@ function ControlPlane({
           <div className="control-safety-title">CONTROL ENVELOPE</div>
           <div className="control-safety-list">
             <div><span>Automaton DB writes by bridge</span><b>NONE</b></div>
+            <div><span>Preflight before START</span><b>REQUIRED</b></div>
             <div><span>Force kill</span><b>DISABLED</b></div>
             <div><span>Graceful signal</span><b>SIGTERM</b></div>
             <div><span>Financial actions</span><b>LOCKED</b></div>
@@ -1543,8 +1632,8 @@ function App() {
         </motion.div>
 
         <footer className="footer-line">
-          <span>ARYQEN CONTROL / V1.6</span>
-          <span>SAFE CONTROL PLANE · LOCAL</span>
+          <span>ARYQEN CONTROL / V1.7</span>
+          <span>DEPENDENCY-AWARE CONTROL · LOCAL</span>
           <span>{new Date().toLocaleDateString()}</span>
         </footer>
       </section>

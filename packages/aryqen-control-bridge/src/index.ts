@@ -106,10 +106,13 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       const observability = getObservability(db);
+      const control = getControlStatus();
       return sendJson(res, 200, {
         ok: true,
         mode: "read-only-db",
         controlMode: "bounded-local",
+        controlPreflight: control.preflight.status,
+        controlBlocker: control.preflight.blocker,
         schemaVersion: getSchemaVersion(db),
         heartbeat: observability.heartbeat.status,
         processUptimeSeconds: observability.bridge.processUptimeSeconds,
@@ -155,7 +158,8 @@ server.listen(port, host, () => {
   console.log(`[ARYQEN bridge] http://${host}:${port}`);
   console.log("[ARYQEN bridge] Automaton DB is opened read-only + query_only");
   console.log("[ARYQEN bridge] Live Git upstream checks are read-only (ls-remote; no fetch/merge)");
-  console.log("[ARYQEN bridge] V1.6 control plane: native --run + verified graceful SIGTERM only");
+  console.log("[ARYQEN bridge] V1.7 dependency-aware control: preflight-gated native --run + verified graceful SIGTERM");
+  console.log("[ARYQEN bridge] Conway auth is inspected by presence only; API key values are never exposed.");
   console.log("[ARYQEN bridge] No direct Automaton DB writes. No force-kill. No TINOPRONO access.");
 });
 

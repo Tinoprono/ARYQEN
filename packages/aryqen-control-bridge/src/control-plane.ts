@@ -15,8 +15,28 @@ export type ControlRuntimeState =
   | "RUNNING_MANAGED"
   | "RUNNING_UNMANAGED";
 
+export type ControlPreflight = {
+  status: "READY" | "BLOCKED";
+  runtimeReady: boolean;
+  configPresent: boolean;
+  buildReady: boolean;
+  apiKeyPresent: boolean;
+  apiKeySource: "ENV" | "AUTOMATON_CONFIG" | "PROVISION_CONFIG" | null;
+  blocker:
+    | "REPO_NOT_FOUND"
+    | "RUNTIME_BUILD_MISSING"
+    | "CONWAY_API_KEY_MISSING"
+    | null;
+  dependency: {
+    name: "CONWAY_AUTH";
+    nativeProvisionCommand: "--provision";
+    upstreamOwned: true;
+  };
+};
+
 export type ControlStatus = {
   mode: "BOUNDED_LOCAL_CONTROL";
+  preflight: ControlPreflight;
   runtime: {
     state: ControlRuntimeState;
     running: boolean;
@@ -81,6 +101,66 @@ function repoRoot(): string | null {
 
 function runtimeDist(root: string): string {
   return path.join(root, "dist", "index.js");
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> | null {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function getRuntimePreflight(): ControlPreflight {
+  const root = repoRoot();
+  const automatonDir = path.join(os.homedir(), ".automaton");
+  const automatonConfigPath = path.join(automatonDir, "automaton.json");
+  const provisionConfigPath = path.join(automatonDir, "config.json");
+
+  const automatonConfig = readJsonObject(automatonConfigPath);
+  const provisionConfig = readJsonObject(provisionConfigPath);
+
+  let apiKeySource: ControlPreflight["apiKeySource"] = null;
+
+  if (hasNonEmptyString(process.env.CONWAY_API_KEY)) {
+    apiKeySource = "ENV";
+  } else if (hasNonEmptyString(automatonConfig?.conwayApiKey)) {
+    apiKeySource = "AUTOMATON_CONFIG";
+  } else if (hasNonEmptyString(provisionConfig?.apiKey)) {
+    apiKeySource = "PROVISION_CONFIG";
+  }
+
+  const configPresent = automatonConfig !== null;
+  const buildReady = root ? fs.existsSync(runtimeDist(root)) : false;
+  const apiKeyPresent = apiKeySource !== null;
+
+  let blocker: ControlPreflight["blocker"] = null;
+  if (!root) blocker = "REPO_NOT_FOUND";
+  else if (!buildReady) blocker = "RUNTIME_BUILD_MISSING";
+  else if (!apiKeyPresent) blocker = "CONWAY_API_KEY_MISSING";
+
+  return {
+    status: blocker === null ? "READY" : "BLOCKED",
+    runtimeReady: blocker === null,
+    configPresent,
+    buildReady,
+    apiKeyPresent,
+    apiKeySource,
+    blocker,
+    dependency: {
+      name: "CONWAY_AUTH",
+      nativeProvisionCommand: "--provision",
+      upstreamOwned: true,
+    },
+  };
 }
 
 function isAlive(pid: number): boolean {
@@ -236,9 +316,11 @@ function inspectRuntime() {
 
 export function getControlStatus(): ControlStatus {
   const runtime = inspectRuntime();
+  const preflight = getRuntimePreflight();
 
   return {
     mode: "BOUNDED_LOCAL_CONTROL",
+    preflight,
     runtime: {
       state: runtime.state,
       running: runtime.running,
@@ -247,7 +329,7 @@ export function getControlStatus(): ControlStatus {
       startedAt: runtime.startedAt,
     },
     capabilities: {
-      start: !runtime.running,
+      start: !runtime.running && preflight.runtimeReady,
       stopManaged: runtime.running && runtime.managed,
       pause: false,
       resume: false,
@@ -315,6 +397,30 @@ export async function startManagedRuntime() {
     return {
       ok: false,
       code: current.managed ? "ALREADY_RUNNING" : "UNMANAGED_RUNTIME_PRESENT",
+      message: detail,
+      status: getControlStatus(),
+    };
+  }
+
+  const preflight = getRuntimePreflight();
+  if (!preflight.runtimeReady) {
+    const detail =
+      preflight.blocker === "CONWAY_API_KEY_MISSING"
+        ? "Conway API key is missing; native Automaton provisioning remains upstream-owned"
+        : preflight.blocker === "RUNTIME_BUILD_MISSING"
+          ? "Automaton runtime build is missing"
+          : "ARYQEN repository root could not be resolved";
+
+    audit({
+      action: "START",
+      outcome: "BLOCKED",
+      pid: null,
+      detail,
+    });
+
+    return {
+      ok: false,
+      code: preflight.blocker ?? "PREFLIGHT_BLOCKED",
       message: detail,
       status: getControlStatus(),
     };
@@ -498,7 +604,7 @@ export async function stopManagedRuntime() {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
 
-  // Deliberately no SIGKILL fallback in V1.6.
+  // Deliberately no SIGKILL fallback in V1.7.
   audit({
     action: "STOP",
     outcome: "PENDING",

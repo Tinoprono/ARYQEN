@@ -1939,3 +1939,148 @@ h1 span {
     flex-wrap: wrap;
   }
 }
+
+
+/* ────────────────────────────────────────────────────────────────
+   ARYQEN CONTROL V1.7 — upstream dependency preflight awareness
+   ──────────────────────────────────────────────────────────────── */
+
+.control-runtime-state.blocked {
+  color: #bf7880;
+}
+
+.control-runtime-state.blocked i {
+  background: #b05261;
+  box-shadow: 0 0 12px rgba(214, 78, 101, .45);
+}
+
+.dependency-gate {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.35fr) repeat(4, minmax(110px, .62fr));
+  gap: 1px;
+  margin-top: 14px;
+  border: 1px solid rgba(72, 191, 230, .09);
+  background: rgba(7, 24, 37, .44);
+}
+
+.dependency-gate > div {
+  min-height: 78px;
+  padding: 12px 13px;
+  background: rgba(2, 12, 22, .66);
+  border-right: 1px solid rgba(72, 191, 230, .055);
+}
+
+.dependency-gate.ready {
+  border-color: rgba(62, 226, 189, .13);
+}
+
+.dependency-gate.blocked {
+  border-color: rgba(184, 76, 96, .16);
+  box-shadow: inset 0 0 38px rgba(116, 39, 62, .018);
+}
+
+.dependency-identity span,
+.dependency-metric span {
+  display: block;
+  color: #4b7584;
+  font-size: 7px;
+  letter-spacing: .13em;
+}
+
+.dependency-identity b {
+  display: block;
+  margin-top: 7px;
+  color: #89d9e7;
+  font-size: 11px;
+  letter-spacing: .13em;
+}
+
+.dependency-identity p {
+  max-width: 310px;
+  margin: 7px 0 0;
+  color: #4d6d79;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.dependency-metric {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.dependency-metric b {
+  margin-top: 7px;
+  color: #8aa8b3;
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.dependency-gate.ready .dependency-metric b {
+  color: #56d8b9;
+}
+
+.dependency-gate.blocked .dependency-metric:last-of-type b,
+.dependency-gate.blocked .dependency-metric:nth-of-type(4) b {
+  color: #c87982;
+}
+
+.dependency-metric em {
+  margin-top: 4px;
+  color: #43636e;
+  font-size: 6px;
+  font-style: normal;
+  letter-spacing: .08em;
+}
+
+.dependency-detail {
+  grid-column: 1 / -1;
+  min-height: auto !important;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid rgba(72, 191, 230, .055);
+  border-right: 0 !important;
+}
+
+.dependency-detail span {
+  color: #617f8a;
+  font-size: 8px;
+}
+
+.dependency-gate.blocked .dependency-detail span {
+  color: #a06f78;
+}
+
+.dependency-detail code {
+  color: #518494;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 7px;
+}
+
+@media (max-width: 1180px) {
+  .dependency-gate {
+    grid-template-columns: 1.25fr repeat(2, 1fr);
+  }
+
+  .dependency-identity {
+    grid-row: span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .dependency-gate {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dependency-identity {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  .dependency-detail {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
