@@ -117,6 +117,45 @@ type ObservabilityData = {
   };
 };
 
+type ControlStatusData = {
+  mode: string;
+  runtime: {
+    state: "STOPPED" | "RUNNING_MANAGED" | "RUNNING_UNMANAGED";
+    running: boolean;
+    managed: boolean;
+    pid: number | null;
+    startedAt: string | null;
+  };
+  capabilities: {
+    start: boolean;
+    stopManaged: boolean;
+    pause: false;
+    resume: false;
+  };
+  safety: {
+    automatonDbWritesByBridge: false;
+    forceKill: false;
+    gracefulSignal: "SIGTERM";
+    tinopronoAccess: false;
+    financialActions: false;
+  };
+  nativeSurface: {
+    runtime: string[];
+    creatorCli: string[];
+  };
+};
+
+type ControlAuditData = {
+  entries: Array<{
+    at: string;
+    action: string;
+    outcome: string;
+    pid: number | null;
+    detail: string | null;
+  }>;
+};
+
+
 const emptyOverview: Overview = {
   agent: { name: "ARYQEN", state: "offline", tier: null, uptimeSeconds: null },
   mission: { id: null, title: null, progress: 0, runningTasks: 0 },
@@ -203,6 +242,37 @@ const emptyObservability: ObservabilityData = {
     lastMetricSnapshotAt: null,
   },
 };
+
+const emptyControlStatus: ControlStatusData = {
+  mode: "BOUNDED_LOCAL_CONTROL",
+  runtime: {
+    state: "STOPPED",
+    running: false,
+    managed: false,
+    pid: null,
+    startedAt: null,
+  },
+  capabilities: {
+    start: true,
+    stopManaged: false,
+    pause: false,
+    resume: false,
+  },
+  safety: {
+    automatonDbWritesByBridge: false,
+    forceKill: false,
+    gracefulSignal: "SIGTERM",
+    tinopronoAccess: false,
+    financialActions: false,
+  },
+  nativeSurface: {
+    runtime: [],
+    creatorCli: [],
+  },
+};
+
+const emptyControlAudit: ControlAuditData = { entries: [] };
+
 
 const NAV_ITEMS: Array<{ key: ViewKey; index: string; label: string }> = [
   { key: "control", index: "01", label: "CONTROL" },
@@ -567,16 +637,177 @@ function Section({
   );
 }
 
+
+function ControlPlane({
+  status,
+  connected,
+  audit,
+}: {
+  status: ControlStatusData;
+  connected: boolean;
+  audit: ControlAuditData;
+}) {
+  const [confirmAction, setConfirmAction] = React.useState<"start" | "stop" | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState<string | null>(null);
+
+  const execute = async (action: "start" | "stop") => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const response = await fetch(`/api/control/${action}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-aryqen-confirm":
+            action === "start" ? "START_ARYQEN_RUNTIME" : "STOP_ARYQEN_RUNTIME",
+        },
+        body: "{}",
+      });
+      const payload = (await response.json()) as { message?: string; code?: string };
+      setResult(payload.message ?? payload.code ?? `HTTP ${response.status}`);
+    } catch {
+      setResult("Control request failed: bridge unavailable.");
+    } finally {
+      setBusy(false);
+      setConfirmAction(null);
+    }
+  };
+
+  const runtimeLabel = !connected
+    ? "BRIDGE OFFLINE"
+    : status.runtime.state.replaceAll("_", " ");
+
+  return (
+    <section className="control-plane panel">
+      <div className="panel-head">
+        <div>
+          <div className="panel-title">SAFE CONTROL PLANE</div>
+          <div className="panel-kicker">Native Automaton lifecycle · explicit confirmation · local only</div>
+        </div>
+        <div className={`control-runtime-state ${status.runtime.running ? "running" : ""}`}>
+          <i />
+          {runtimeLabel}
+        </div>
+      </div>
+
+      <div className="control-plane-grid">
+        <div className="control-actions">
+          <div className="control-action-card">
+            <span className="control-action-index">01</span>
+            <div>
+              <b>START RUNTIME</b>
+              <p>Launches the native Automaton <code>--run</code> entry point.</p>
+            </div>
+
+            {confirmAction === "start" ? (
+              <div className="confirm-row">
+                <button className="control-button confirm" disabled={busy} onClick={() => void execute("start")}>
+                  {busy ? "STARTING…" : "CONFIRM START"}
+                </button>
+                <button className="control-button ghost" disabled={busy} onClick={() => setConfirmAction(null)}>
+                  CANCEL
+                </button>
+              </div>
+            ) : (
+              <button
+                className="control-button"
+                disabled={!connected || !status.capabilities.start || busy}
+                onClick={() => setConfirmAction("start")}
+              >
+                START
+              </button>
+            )}
+          </div>
+
+          <div className="control-action-card">
+            <span className="control-action-index">02</span>
+            <div>
+              <b>SAFE STOP</b>
+              <p>Sends graceful <code>SIGTERM</code> only to an ARYQEN-owned runtime.</p>
+            </div>
+
+            {confirmAction === "stop" ? (
+              <div className="confirm-row">
+                <button className="control-button danger confirm" disabled={busy} onClick={() => void execute("stop")}>
+                  {busy ? "STOPPING…" : "CONFIRM STOP"}
+                </button>
+                <button className="control-button ghost" disabled={busy} onClick={() => setConfirmAction(null)}>
+                  CANCEL
+                </button>
+              </div>
+            ) : (
+              <button
+                className="control-button danger"
+                disabled={!connected || !status.capabilities.stopManaged || busy}
+                onClick={() => setConfirmAction("stop")}
+              >
+                STOP
+              </button>
+            )}
+          </div>
+
+          <div className="native-gap">
+            <span>NATIVE PAUSE / RESUME</span>
+            <b>NOT EXPOSED BY AUTOMATON v0.2.1</b>
+            <p>ARYQEN does not invent a fake pause/resume path or write runtime state directly.</p>
+          </div>
+        </div>
+
+        <div className="control-safety">
+          <div className="control-safety-title">CONTROL ENVELOPE</div>
+          <div className="control-safety-list">
+            <div><span>Automaton DB writes by bridge</span><b>NONE</b></div>
+            <div><span>Force kill</span><b>DISABLED</b></div>
+            <div><span>Graceful signal</span><b>SIGTERM</b></div>
+            <div><span>Financial actions</span><b>LOCKED</b></div>
+            <div><span>TINOPRONO access</span><b>DENIED</b></div>
+          </div>
+
+          <div className="control-native">
+            <span>NATIVE SURFACE</span>
+            <p>{status.nativeSurface.runtime.join(" · ") || "waiting for bridge"}</p>
+          </div>
+        </div>
+
+        <div className="control-audit">
+          <div className="control-safety-title">LOCAL AUDIT</div>
+          {audit.entries.length === 0 ? (
+            <div className="control-audit-empty">No control actions recorded yet.</div>
+          ) : (
+            audit.entries.slice(0, 6).map((entry, index) => (
+              <div className="control-audit-line" key={`${entry.at}-${index}`}>
+                <span>{timeLabel(entry.at)}</span>
+                <b>{entry.action}</b>
+                <em>{entry.outcome}</em>
+                <p>{entry.detail ?? "—"}</p>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {result && <div className="control-result">{result}</div>}
+    </section>
+  );
+}
+
 function ControlView({
   overview,
   overviewConnected,
   activity,
   activityConnected,
+  controlStatus,
+  controlConnected,
+  controlAudit,
 }: {
   overview: Overview;
   overviewConnected: boolean;
   activity: Activity;
   activityConnected: boolean;
+  controlStatus: ControlStatusData;
+  controlConnected: boolean;
+  controlAudit: ControlAuditData;
 }) {
   const o = overview;
   const activityFeed = buildActivityFeed(activity);
@@ -703,13 +934,13 @@ function ControlView({
         <div className="panel integrity-panel">
           <div className="panel-title">CORE INTEGRITY</div>
           <div className="integrity-orb">
-            <span>READ</span>
-            <b>ONLY</b>
+            <span>CORE</span>
+            <b>SAFE</b>
           </div>
           <div className="integrity-list">
             <div><span>Automaton core</span><b>INTACT</b></div>
-            <div><span>Control bridge</span><b>QUERY_ONLY</b></div>
-            <div><span>Financial actions</span><b>LOCKED</b></div>
+            <div><span>Automaton DB</span><b>QUERY_ONLY</b></div>
+            <div><span>Control actions</span><b>GATED</b></div>
             <div><span>TINOPRONO access</span><b>DENIED</b></div>
           </div>
         </div>
@@ -724,6 +955,12 @@ function ControlView({
           <div className="security-chip">MINIMAL DELTA · REVERSIBLE</div>
         </div>
       </section>
+
+      <ControlPlane
+        status={controlStatus}
+        connected={controlConnected}
+        audit={controlAudit}
+      />
     </>
   );
 }
@@ -1172,6 +1409,8 @@ function App() {
   const upstreamPoll = usePolling<UpstreamData>("/api/upstream", emptyUpstream, 5000);
   const systemPoll = usePolling<SystemData>("/api/system", emptySystem, 3000);
   const observabilityPoll = usePolling<ObservabilityData>("/api/observability", emptyObservability, 1800);
+  const controlStatusPoll = usePolling<ControlStatusData>("/api/control/status", emptyControlStatus, 1200);
+  const controlAuditPoll = usePolling<ControlAuditData>("/api/control/audit", emptyControlAudit, 1600);
 
   const o = overviewPoll.data;
   const nominal = overviewPoll.connected && o.heartbeat.healthy;
@@ -1209,6 +1448,9 @@ function App() {
             overviewConnected={overviewPoll.connected}
             activity={activityPoll.data}
             activityConnected={activityPoll.connected}
+            controlStatus={controlStatusPoll.data}
+            controlConnected={controlStatusPoll.connected}
+            controlAudit={controlAuditPoll.data}
           />
         );
     }
@@ -1288,7 +1530,7 @@ function App() {
                   : `${o.upstream.behind} BEHIND`}
             </b>
           </span>
-          <span>ACCESS <b>READ ONLY</b></span>
+          <span>ACCESS <b>CONTROL GATED</b></span>
         </div>
 
         <motion.div
@@ -1301,8 +1543,8 @@ function App() {
         </motion.div>
 
         <footer className="footer-line">
-          <span>ARYQEN CONTROL / V1.5</span>
-          <span>READ-ONLY CONTROL CENTER · LOCAL</span>
+          <span>ARYQEN CONTROL / V1.6</span>
+          <span>SAFE CONTROL PLANE · LOCAL</span>
           <span>{new Date().toLocaleDateString()}</span>
         </footer>
       </section>
