@@ -122,6 +122,50 @@ type CandidateData = {
   auditPath: string;
 };
 
+
+type RunnerData = {
+  schemaVersion: 1;
+  status: "IDLE" | "BLOCKED" | "READY" | "RUNNING" | "PASS" | "FAIL";
+  candidateSha: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  runPath: string | null;
+  checks: Array<{
+    id: string;
+    status: "NOT_RUN" | "PASS" | "FAIL";
+    detail: string;
+    durationMs: number | null;
+    logPath: string | null;
+  }>;
+  error: string | null;
+  backend: {
+    kind: "docker" | "podman" | null;
+    binary: string | null;
+    installed: boolean;
+    ready: boolean;
+    version: string | null;
+    image: string;
+    detail: string;
+  };
+  candidateCurrent: boolean;
+  capabilities: { run: boolean };
+  safety: {
+    stableRepositoryMounted: false;
+    automatonStateMounted: false;
+    hostSecretsPassed: false;
+    tinopronoAccess: false;
+    candidateExecutionNetwork: "NONE";
+    dependencyPreparation: string;
+    sandboxRootFilesystem: "READ_ONLY";
+    sandboxCapabilities: "DROP_ALL";
+    sandboxNoNewPrivileges: true;
+    sandboxMemoryLimit: string;
+    sandboxCpuLimit: string;
+    sandboxPidsLimit: number;
+  };
+  auditPath: string;
+};
+
 type SystemData = {
   schemaVersion: number | string | null;
   agentState: string;
@@ -321,6 +365,49 @@ const emptyCandidate: CandidateData = {
   error: null,
   stableMutationAllowed: false,
   candidateWorkspaceRoot: "",
+  auditPath: "",
+};
+
+
+const emptyRunner: RunnerData = {
+  schemaVersion: 1,
+  status: "IDLE",
+  candidateSha: null,
+  startedAt: null,
+  finishedAt: null,
+  runPath: null,
+  checks: [
+    { id: "UPSTREAM_BASELINE", status: "NOT_RUN", detail: "Waiting for an eligible candidate.", durationMs: null, logPath: null },
+    { id: "ARYQEN_CONTRACT", status: "NOT_RUN", detail: "Waiting for an eligible candidate.", durationMs: null, logPath: null },
+    { id: "ARYQEN_INTEGRATION", status: "NOT_RUN", detail: "Waiting for an eligible candidate.", durationMs: null, logPath: null },
+    { id: "AUTOMATON_CORE_INTEGRITY", status: "NOT_RUN", detail: "Waiting for an eligible candidate.", durationMs: null, logPath: null },
+  ],
+  error: null,
+  backend: {
+    kind: null,
+    binary: null,
+    installed: false,
+    ready: false,
+    version: null,
+    image: "node:22-bookworm",
+    detail: "Sandbox backend unavailable.",
+  },
+  candidateCurrent: false,
+  capabilities: { run: false },
+  safety: {
+    stableRepositoryMounted: false,
+    automatonStateMounted: false,
+    hostSecretsPassed: false,
+    tinopronoAccess: false,
+    candidateExecutionNetwork: "NONE",
+    dependencyPreparation: "NETWORKED_SANDBOX_WITH_LIFECYCLE_SCRIPTS_DISABLED",
+    sandboxRootFilesystem: "READ_ONLY",
+    sandboxCapabilities: "DROP_ALL",
+    sandboxNoNewPrivileges: true,
+    sandboxMemoryLimit: "2g",
+    sandboxCpuLimit: "2",
+    sandboxPidsLimit: 256,
+  },
   auditPath: "",
 };
 
@@ -1419,14 +1506,21 @@ function UpstreamView({
   data,
   candidate,
   candidateConnected,
+  runner,
+  runnerConnected,
 }: {
   data: UpstreamData;
   candidate: CandidateData;
   candidateConnected: boolean;
+  runner: RunnerData;
+  runnerConnected: boolean;
 }) {
   const [confirmPrepare, setConfirmPrepare] = React.useState(false);
   const [preparing, setPreparing] = React.useState(false);
   const [prepareResult, setPrepareResult] = React.useState<string | null>(null);
+  const [confirmRun, setConfirmRun] = React.useState(false);
+  const [runningSuite, setRunningSuite] = React.useState(false);
+  const [runResult, setRunResult] = React.useState<string | null>(null);
 
   const statusTone =
     data.status === "SYNCED"
@@ -1481,6 +1575,29 @@ function UpstreamView({
     }
   };
 
+
+  const runCompatibility = async () => {
+    setRunningSuite(true);
+    setRunResult(null);
+    try {
+      const response = await fetch("/api/upstream/runner/run", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-aryqen-confirm": "RUN_ISOLATED_COMPATIBILITY",
+        },
+        body: "{}",
+      });
+      const payload = (await response.json()) as { message?: string; code?: string };
+      setRunResult(payload.message ?? payload.code ?? `HTTP ${response.status}`);
+    } catch {
+      setRunResult("Compatibility runner request failed: bridge unavailable.");
+    } finally {
+      setRunningSuite(false);
+      setConfirmRun(false);
+    }
+  };
+
   const detectedSha = data.guard.candidateSha;
   const candidateEligible =
     data.guard.status === "COMPATIBILITY_CHECK_REQUIRED" &&
@@ -1490,6 +1607,15 @@ function UpstreamView({
     candidate.candidateSha === detectedSha;
   const prepareDisabled =
     !candidateConnected || !candidateEligible || preparing || alreadyStaged;
+  const runnerCanRun = runnerConnected && runner.capabilities.run;
+  const runnerTone =
+    runner.status === "PASS"
+      ? "green"
+      : runner.status === "FAIL" || runner.status === "BLOCKED"
+        ? "amber"
+        : runner.status === "RUNNING"
+          ? "violet"
+          : "cyan";
 
   return (
     <div className="view-shell upstream-v18 upstream-v19">
@@ -1503,10 +1629,10 @@ function UpstreamView({
           tone={candidateTone}
         />
         <StatCard
-          label="STABLE MUTATION"
-          value={mutationSafe && !candidate.stableMutationAllowed ? "NONE" : "REVIEW"}
-          detail="stable repository remains pinned"
-          tone={mutationSafe && !candidate.stableMutationAllowed ? "green" : "amber"}
+          label="COMPATIBILITY RUNNER"
+          value={runner.status.replaceAll("_", " ")}
+          detail={runner.backend.ready ? `${runner.backend.kind ?? "sandbox"} · network-off execution` : runner.backend.detail}
+          tone={runnerTone}
         />
       </div>
 
@@ -1540,12 +1666,59 @@ function UpstreamView({
           <div className="candidate-execution-policy">
             <i />
             <div>
-              <b>NO UPSTREAM CODE EXECUTION WITHOUT SANDBOX</b>
-              <span>V1.9 captures and verifies source only. Build/tests remain blocked until ARYQEN has an isolated compatibility runner.</span>
+              <b>NO UPSTREAM CODE EXECUTION ON HOST</b>
+              <span>V2.0 permits candidate build/tests only inside the bounded Docker/Podman compatibility sandbox. Candidate execution receives no network and no host secrets.</span>
             </div>
           </div>
           {prepareResult && <div className="control-result">{prepareResult}</div>}
           {candidate.error && <div className="candidate-error">{candidate.error}</div>}
+        </div>
+      </Section>
+
+
+      <Section title="ISOLATED COMPATIBILITY RUNNER" kicker="Disposable container execution · network disabled for candidate code · stable ARYQEN never mounted">
+        <div className="runner-panel">
+          <div className="runner-summary">
+            <div><span>RUNNER STATE</span><b>{runner.status.replaceAll("_", " ")}</b></div>
+            <div><span>BACKEND</span><b>{runner.backend.kind?.toUpperCase() ?? "NONE"}</b></div>
+            <div><span>ENGINE</span><b>{runner.backend.ready ? "READY" : "UNAVAILABLE"}</b></div>
+            <div><span>EXEC NETWORK</span><b>{runner.safety.candidateExecutionNetwork}</b></div>
+            <div><span>HOST SECRETS</span><b>{runner.safety.hostSecretsPassed ? "EXPOSED" : "NONE"}</b></div>
+            <div><span>STABLE REPO MOUNT</span><b>{runner.safety.stableRepositoryMounted ? "YES" : "NO"}</b></div>
+          </div>
+
+          <div className="runner-check-grid">
+            {runner.checks.map((check) => (
+              <div className={`runner-check runner-${check.status.toLowerCase()}`} key={check.id}>
+                <i />
+                <div>
+                  <span>{check.id.replaceAll("_", " ")}</span>
+                  <p>{check.detail}</p>
+                </div>
+                <b>{check.status.replaceAll("_", " ")}</b>
+              </div>
+            ))}
+          </div>
+
+          <div className="runner-action-row">
+            <div>
+              <b>BOUNDED EXECUTION ENVELOPE</b>
+              <p>{runner.backend.detail} Root filesystem is read-only, Linux capabilities are dropped, no-new-privileges is enabled, and only a disposable run workspace is mounted.</p>
+            </div>
+            {confirmRun ? (
+              <div className="confirm-row">
+                <button className="control-button confirm" disabled={runningSuite} onClick={() => void runCompatibility()}>{runningSuite ? "RUNNING…" : "CONFIRM RUN"}</button>
+                <button className="control-button ghost" disabled={runningSuite} onClick={() => setConfirmRun(false)}>CANCEL</button>
+              </div>
+            ) : (
+              <button className="control-button candidate-button" disabled={!runnerCanRun || runningSuite} onClick={() => setConfirmRun(true)}>
+                {!runnerConnected ? "OFFLINE" : runner.status === "RUNNING" ? "RUNNING" : !runner.backend.ready ? "NO SANDBOX" : !runner.candidateCurrent ? "WAITING CANDIDATE" : runner.status === "PASS" ? "RUN AGAIN" : "RUN SUITE"}
+              </button>
+            )}
+          </div>
+
+          {runResult && <div className="control-result">{runResult}</div>}
+          {runner.error && <div className="candidate-error">{runner.error}</div>}
         </div>
       </Section>
 
@@ -1577,8 +1750,8 @@ function UpstreamView({
           {[
             ["DETECTED", data.status === "UPDATE_AVAILABLE"],
             ["CANDIDATE", candidate.status === "PREPARING" || candidate.status === "PREPARED_WAITING_SANDBOX"],
-            ["COMPATIBILITY TESTS", candidate.status === "PREPARED_WAITING_SANDBOX"],
-            ["READY", false],
+            ["COMPATIBILITY TESTS", runner.status === "READY" || runner.status === "RUNNING" || runner.status === "PASS" || runner.status === "FAIL"],
+            ["READY", runner.status === "PASS"],
             ["PROMOTED", false],
           ].map(([label, active], index) => (
             <React.Fragment key={String(label)}>
@@ -1590,7 +1763,7 @@ function UpstreamView({
       </Section>
 
       <div className="view-columns two">
-        <Section title="CANDIDATE VERIFICATION" kicker="Static checks are allowed; runtime execution remains sandbox-gated">
+        <Section title="STATIC CANDIDATE VERIFICATION" kicker="Source capture and immutability checks remain separate from sandbox execution">
           <div className="candidate-check-grid">
             {candidate.checks.map((check) => (
               <div className={`candidate-check check-${check.status.toLowerCase()}`} key={check.id}>
@@ -1606,7 +1779,7 @@ function UpstreamView({
             <div><span>stable git merge</span><b>DISABLED</b></div>
             <div><span>stable git checkout</span><b>DISABLED</b></div>
             <div><span>candidate source fetch</span><b>ISOLATED ONLY</b></div>
-            <div><span>candidate code execution</span><b>BLOCKED</b></div>
+            <div><span>candidate code execution</span><b>{runner.backend.ready ? "SANDBOX ONLY" : "BLOCKED"}</b></div>
             <div><span>stable runtime mutation</span><b>NONE</b></div>
           </div>
         </Section>
@@ -1758,6 +1931,7 @@ function App() {
   const policyPoll = usePolling<PolicyData>("/api/policy", emptyPolicy, 2200);
   const upstreamPoll = usePolling<UpstreamData>("/api/upstream", emptyUpstream, 5000);
   const candidatePoll = usePolling<CandidateData>("/api/upstream/candidate", emptyCandidate, 2500);
+  const runnerPoll = usePolling<RunnerData>("/api/upstream/runner", emptyRunner, 3000);
   const systemPoll = usePolling<SystemData>("/api/system", emptySystem, 3000);
   const observabilityPoll = usePolling<ObservabilityData>("/api/observability", emptyObservability, 1800);
   const controlStatusPoll = usePolling<ControlStatusData>("/api/control/status", emptyControlStatus, 1200);
@@ -1793,6 +1967,8 @@ function App() {
             data={upstreamPoll.data}
             candidate={candidatePoll.data}
             candidateConnected={candidatePoll.connected}
+            runner={runnerPoll.data}
+            runnerConnected={runnerPoll.connected}
           />
         );
       case "system":
@@ -1902,8 +2078,8 @@ function App() {
         </motion.div>
 
         <footer className="footer-line">
-          <span>ARYQEN CONTROL / V1.9</span>
-          <span>ISOLATED CANDIDATE PIPELINE · LOCAL</span>
+          <span>ARYQEN CONTROL / V2.0</span>
+          <span>ISOLATED COMPATIBILITY RUNNER · LOCAL</span>
           <span>{new Date().toLocaleDateString()}</span>
         </footer>
       </section>

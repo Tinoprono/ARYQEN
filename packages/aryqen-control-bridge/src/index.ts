@@ -22,6 +22,10 @@ import {
   getCandidateStatus,
   prepareUpstreamCandidate,
 } from "./candidate-upgrade.js";
+import {
+  getCompatibilityRunnerStatus,
+  runCompatibilitySuite,
+} from "./compatibility-runner.js";
 
 const dbPath = process.env.AUTOMATON_DB_PATH;
 if (!dbPath) throw new Error("AUTOMATON_DB_PATH is required");
@@ -67,6 +71,7 @@ const routes: Record<string, () => unknown> = {
   "/api/activity": () => getActivity(db),
   "/api/upstream": () => getLiveUpstream(),
   "/api/upstream/candidate": () => getCandidateStatus(),
+  "/api/upstream/runner": () => getCompatibilityRunnerStatus(),
   "/api/system": () => getSystem(db),
   "/api/observability": () => getObservability(db),
   "/api/control/status": () => getControlStatus(),
@@ -162,6 +167,18 @@ const server = createServer(async (req, res) => {
       return sendJson(res, result.ok ? 200 : 409, result);
     }
 
+    if (req.method === "POST" && url.pathname === "/api/upstream/runner/run") {
+      if (!controlRequestAllowed(req)) {
+        return sendJson(res, 403, { error: "runner_request_rejected" });
+      }
+      if (req.headers["x-aryqen-confirm"] !== "RUN_ISOLATED_COMPATIBILITY") {
+        return sendJson(res, 409, { error: "explicit_confirmation_required" });
+      }
+
+      const result = await runCompatibilitySuite();
+      return sendJson(res, result.ok ? 200 : 409, result);
+    }
+
     const handler = req.method === "GET" ? routes[url.pathname] : undefined;
     if (!handler) return sendJson(res, 404, { error: "not_found" });
     return sendJson(res, 200, handler());
@@ -179,6 +196,8 @@ server.listen(port, host, () => {
   console.log("[ARYQEN bridge] Live Git upstream checks are read-only (ls-remote; no fetch/merge)");
   console.log("[ARYQEN bridge] V1.9 candidate pipeline: isolated upstream staging under ~/.aryqen/candidates; stable repo immutable");
   console.log("[ARYQEN bridge] Candidate source can be fetched in isolation; upstream code execution remains blocked without sandbox");
+  console.log("[ARYQEN bridge] V2.0 compatibility runner: Docker/Podman sandbox only; candidate execution network=none");
+  console.log("[ARYQEN bridge] Runner mounts only disposable workspaces; no stable repo, Automaton state, host secrets or TINOPRONO paths");
   console.log("[ARYQEN bridge] V1.8 upstream compatibility guard remains active: live SHA detection + promotion gate");
   console.log("[ARYQEN bridge] V1.7 dependency-aware control remains active: preflight-gated native --run + graceful SIGTERM");
   console.log("[ARYQEN bridge] Conway auth is inspected by presence only; API key values are never exposed.");
